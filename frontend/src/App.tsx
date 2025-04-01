@@ -4,6 +4,7 @@ import WelcomePage from './Pages/WelcomePage'
 import RoomPage from './Pages/RoomPage'
 import { Toaster } from './components/ui/sonner'
 import PageNotFound from './Pages/PageNotFound'
+
 function App() {
   return <ThemeProvider defaultTheme="light" storageKey="planning-poker-theme">
     <Router>
