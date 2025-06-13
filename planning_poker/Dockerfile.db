@@ -1,0 +1,12 @@
+FROM postgres:15-alpine
+
+# Set environment variables
+ENV POSTGRES_DB=planning_poker_db
+ENV POSTGRES_USER=postgres
+ENV POSTGRES_PASSWORD=postgres
+
+# Create a directory for initialization scripts
+COPY ./init-db.sql /docker-entrypoint-initdb.d/
+
+# Expose the PostgreSQL port
+EXPOSE 5432
