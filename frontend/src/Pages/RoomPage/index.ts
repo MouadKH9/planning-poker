@@ -1,9 +1,9 @@
-export * from './ConnectionStatus'
-export * from './RoomHeader'
-export * from './ParticipantCard'
-export * from './VotingControls'
-export * from './CardSelector'
-export * from './types'
+export * from "./ConnectionStatus";
+export * from "./RoomHeader";
+export * from "./ParticipantCard";
+export * from "./VotingControls";
+export * from "./CardSelector";
+export * from "./types";
 
-import RoomPage from './RoomPage'
-export default RoomPage 
+// Re-export the default export from RoomPage.tsx
+export { default } from "./RoomPage";
