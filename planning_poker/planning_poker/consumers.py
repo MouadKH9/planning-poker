@@ -2,7 +2,6 @@ import json
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from django.contrib.auth.models import User
 from planning_poker.models import Room, Participant
 from planning_poker.fields import STATUS_CHOICES
 
