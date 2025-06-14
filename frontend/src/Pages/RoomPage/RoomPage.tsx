@@ -103,7 +103,7 @@ export default function RoomPage() {
       toast.info("Votes reset");
     });
 
-    ws.on("round_started", (data) => {
+    ws.on("round_started", () => {
       setParticipants((prev) =>
         prev.map((p) => ({
           ...p,

@@ -20,6 +20,7 @@ export interface Participant {
   username: string;
   card_selection: string | null;
   has_voted: boolean;
+  vote: number | null;
 }
 
 export interface VotingStats {
