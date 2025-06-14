@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { roomsApi } from "@/lib"
 import { toast } from "sonner"
+import Header from "./Header"
 
 export default function WelcomePage() {
     const [roomCode, setRoomCode] = useState("")
@@ -59,18 +60,7 @@ export default function WelcomePage() {
 
     return (
         <div className="min-h-screen flex flex-col">
-            {/* Header */}
-            <header className="flex justify-between items-center p-4 border-b">
-                <div className="font-bold text-xl">PlanningPoker</div>
-                <div className="flex gap-2">
-                    <Button variant="ghost" className="text-sm">
-                        Login
-                    </Button>
-                    <Button variant="default" className="bg-black text-white hover:bg-gray-800 text-sm">
-                        Sign Up
-                    </Button>
-                </div>
-            </header>
+            <Header />
 
             {/* Main Content */}
             <main className="flex-1 flex flex-col items-center justify-center max-w-md mx-auto w-full px-4">

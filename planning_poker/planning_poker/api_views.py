@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
+from rest_framework.permissions import IsAuthenticated
 
 from planning_poker.models import Room, Participant, SessionLog
 from planning_poker.fields import STATUS_CHOICES
@@ -16,7 +17,15 @@ class RoomViewSet(viewsets.ModelViewSet):
 
     queryset = Room.objects.all()
     serializer_class = RoomSerializer
-
+    
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        """
+        if self.action == 'create':
+            self.permission_classes = [IsAuthenticated]
+        return super().get_permissions()
+    
     def create(self, request, *args, **kwargs):
         """Create a new room (POST /api/rooms/)"""
         host = request.user  # This would require authentication
