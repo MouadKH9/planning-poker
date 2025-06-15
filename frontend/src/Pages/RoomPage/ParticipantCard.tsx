@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { ParticipantAvatar } from "@/components/ParticipantAvatar";
 import { Participant } from "@/types/index";
+import { Button } from "@/components/ui/button";
 
 interface ParticipantCardProps {
   participant: Participant;
@@ -33,12 +34,13 @@ export function ParticipantCard({
           <span className="text-red-500 text-sm">Waiting for vote...</span>
         )}
         {isHost && participant.has_voted && (
-          <button
+          <Button
+            size={"lg"}
             className="text-blue-600 text-sm hover:underline"
             onClick={onSkip}
           >
             Skip
-          </button>
+          </Button>
         )}
         {participant.vote !== null ? (
           isRevealed ? (
