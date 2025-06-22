@@ -6,6 +6,7 @@ import { Toaster } from './components/ui/sonner'
 import PageNotFound from './Pages/PageNotFound'
 import LoginPage from "./Pages/Auth/LoginPage/LoginPage"
 import { AuthProvider } from "@/contexts/AuthContext"
+import SignupPage from "./Pages/Auth/SignupPage/SignupPage"
 
 function App() {
   return <ThemeProvider defaultTheme="light" storageKey="planning-poker-theme">
@@ -14,6 +15,7 @@ function App() {
         <Routes>
           <Route path="/" element={<WelcomePage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
           <Route path="/room/:roomId" element={<RoomPage />} />
           <Route path="*" element={<PageNotFound />} />
         </Routes>

@@ -4,14 +4,15 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { roomsApi } from "@/lib"
 import { toast } from "sonner"
 import Header from "./Header"
+import { useAuth } from "@/contexts/AuthContext"
 
 export default function WelcomePage() {
     const [roomCode, setRoomCode] = useState("")
     const [isLoading, setIsLoading] = useState(false)
     const navigate = useNavigate()
+    const { isAuthenticated } = useAuth()
 
     const handleJoinRoom = async () => {
         if (!roomCode.trim()) {
@@ -38,6 +39,12 @@ export default function WelcomePage() {
     }
 
     const handleCreateRoom = async () => {
+        if (!isAuthenticated) {
+            toast.info("Please sign up to create a room")
+            navigate('/signup?createRoom=true')
+            return
+        }
+
         setIsLoading(true)
         try {
             // In a real app, you would create a room via API
@@ -96,7 +103,7 @@ export default function WelcomePage() {
                             className="w-full"
                             disabled={isLoading}
                         >
-                            {isLoading ? "Creating..." : "Create New Room"}
+                            Create New Room
                         </Button>
                     </div>
                 </div>

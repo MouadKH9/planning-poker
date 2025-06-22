@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom"
 
 export default function Header() {
     const navigate = useNavigate()
-    const { isAuthenticated, user } = useAuth()
+    const { isAuthenticated, user, logout } = useAuth()
 
     const handleLogin = () => {
         navigate('/login')
@@ -14,13 +14,23 @@ export default function Header() {
         navigate('/signup')
     }
 
+    const handleLogout = () => {
+        logout();
+        navigate('/');
+    }
+
     if (isAuthenticated) return (
         <header className="flex justify-between items-center p-4 border-b">
             <div className="font-bold text-xl">PlanningPoker</div>
             <div className="flex gap-2">
-                {user?.username}
+                <Button variant="ghost" className="text-sm">
+                    {user?.username}
+                </Button>
+                <Button onClick={handleLogout} variant="ghost" className="text-sm">
+                    Logout
+                </Button>
             </div>
-        </header>
+        </header >
     )
 
     return (
