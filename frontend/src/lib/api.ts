@@ -5,6 +5,7 @@ export interface Room {
   id: string;
   name: string;
   created_at: string;
+  code: string;
 }
 
 export interface Participant {

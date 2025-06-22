@@ -45,7 +45,7 @@ export class PlanningPokerWebSocket {
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const wsUrl = `ws://localhost:8000/ws/rooms/${this.roomId}/`;
+      const wsUrl = `${import.meta.env.VITE_WS_URL}/rooms/${this.roomId}/`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {

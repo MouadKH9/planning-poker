@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import Header from "./Header"
 import { useAuth } from "@/contexts/AuthContext"
+import { roomsApi } from "@/lib/api"
 
 export default function WelcomePage() {
     const [roomCode, setRoomCode] = useState("")
@@ -47,14 +48,9 @@ export default function WelcomePage() {
 
         setIsLoading(true)
         try {
-            // In a real app, you would create a room via API
-            // Example:
-            // const newRoom = await roomsApi.create("New Planning Session")
-            // navigate(`/room/${newRoom.id}`)
-
-            // For demo purposes, generate a random room code
-            const randomRoomId = Math.random().toString(36).substring(2, 8)
-            navigate(`/room/${randomRoomId}`)
+            // Create a room via API
+            const newRoom = await roomsApi.create()
+            navigate(`/room/${newRoom.code}`)
         } catch (error) {
             console.error("Failed to create room:", error)
             toast.error("Failed to create room", {
