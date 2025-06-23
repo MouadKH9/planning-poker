@@ -1,110 +1,108 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { toast } from "sonner"
-import Header from "./Header"
-import { useAuth } from "@/contexts/AuthContext"
-import { roomsApi } from "@/lib/api"
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+import Header from "./Header";
+import { useAuth } from "@/contexts/AuthContext";
+import { roomsApi } from "@/lib/api";
 
 export default function WelcomePage() {
-    const [roomCode, setRoomCode] = useState("")
-    const [isLoading, setIsLoading] = useState(false)
-    const navigate = useNavigate()
-    const { isAuthenticated } = useAuth()
+  const [roomCode, setRoomCode] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
 
-    const handleJoinRoom = async () => {
-        if (!roomCode.trim()) {
-            toast.error("Room code is required")
-            return
-        }
-
-        setIsLoading(true)
-        try {
-            // In a real app, you would verify the room exists first
-            // Example:
-            // await roomsApi.getById(roomCode)
-
-            // Navigate to the room
-            navigate(`/room/${roomCode}`)
-        } catch (error) {
-            console.error("Failed to join room:", error)
-            toast.error("Failed to join room", {
-                description: "Room not found or network error"
-            })
-        } finally {
-            setIsLoading(false)
-        }
+  const handleJoinRoom = async () => {
+    if (!roomCode.trim()) {
+      toast.error("Room code is required");
+      return;
     }
 
-    const handleCreateRoom = async () => {
-        if (!isAuthenticated) {
-            toast.info("Please sign up to create a room")
-            navigate('/signup?createRoom=true')
-            return
-        }
+    setIsLoading(true);
+    try {
+      // Verify the room exists first - use getById which handles both ID and code
+      await roomsApi.getById(roomCode.trim());
 
-        setIsLoading(true)
-        try {
-            // Create a room via API
-            const newRoom = await roomsApi.create()
-            navigate(`/room/${newRoom.code}`)
-        } catch (error) {
-            console.error("Failed to create room:", error)
-            toast.error("Failed to create room", {
-                description: "Please try again"
-            })
-        } finally {
-            setIsLoading(false)
-        }
+      // Navigate to the room
+      navigate(`/room/${roomCode.trim()}`);
+    } catch (error) {
+      console.error("Failed to join room:", error);
+      toast.error("Failed to join room", {
+        description: "Room not found or network error",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCreateRoom = async () => {
+    if (!isAuthenticated) {
+      toast.info("Please sign up to create a room");
+      navigate("/signup?createRoom=true");
+      return;
     }
 
-    return (
-        <div className="min-h-screen flex flex-col">
-            <Header />
+    setIsLoading(true);
+    try {
+      // Create a room via API
+      const newRoom = await roomsApi.create();
+      navigate(`/room/${newRoom.code}`);
+    } catch (error) {
+      console.error("Failed to create room:", error);
+      toast.error("Failed to create room", {
+        description: "Please try again",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-            {/* Main Content */}
-            <main className="flex-1 flex flex-col items-center justify-center max-w-md mx-auto w-full px-4">
-                <div className="w-full space-y-8">
-                    <h1 className="text-3xl font-bold text-center">
-                        Join Planning
-                        <br />
-                        Session
-                    </h1>
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header />
 
-                    <div className="space-y-4">
-                        <Input
-                            placeholder="Enter room code"
-                            value={roomCode}
-                            onChange={(e) => setRoomCode(e.target.value)}
-                            className="w-full"
-                            disabled={isLoading}
-                        />
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col items-center justify-center max-w-md mx-auto w-full px-4">
+        <div className="w-full space-y-8">
+          <h1 className="text-3xl font-bold text-center">
+            Join Planning
+            <br />
+            Session
+          </h1>
 
-                        <Button
-                            onClick={handleJoinRoom}
-                            className="w-full bg-black text-white hover:bg-gray-800"
-                            disabled={isLoading}
-                        >
-                            {isLoading ? "Joining..." : "Join Room"}
-                        </Button>
+          <div className="space-y-4">
+            <Input
+              placeholder="Enter room code"
+              value={roomCode}
+              onChange={(e) => setRoomCode(e.target.value)}
+              className="w-full"
+              disabled={isLoading}
+            />
 
-                        <div className="text-center text-sm text-gray-500">or</div>
+            <Button
+              onClick={handleJoinRoom}
+              className="w-full bg-black text-white hover:bg-gray-800"
+              disabled={isLoading}
+            >
+              {isLoading ? "Joining..." : "Join Room"}
+            </Button>
 
-                        <Button
-                            onClick={handleCreateRoom}
-                            variant="outline"
-                            className="w-full"
-                            disabled={isLoading}
-                        >
-                            Create New Room
-                        </Button>
-                    </div>
-                </div>
-            </main>
+            <div className="text-center text-sm text-gray-500">or</div>
+
+            <Button
+              onClick={handleCreateRoom}
+              variant="outline"
+              className="w-full"
+              disabled={isLoading}
+            >
+              Create New Room
+            </Button>
+          </div>
         </div>
-    )
+      </main>
+    </div>
+  );
 }
-

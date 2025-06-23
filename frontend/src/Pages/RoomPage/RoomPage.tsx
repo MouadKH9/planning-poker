@@ -15,6 +15,7 @@ import {
   type Participant,
   type VotingStats,
 } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Planning poker card values
 const cardValues = [
@@ -43,6 +44,11 @@ export default function RoomPage() {
   const [roomData, setRoomData] = useState<RoomState["room"] | null>(null);
   const [votingStats, setVotingStats] = useState<VotingStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<"admin" | "participant">(
+    "participant"
+  );
+  const [canControl, setCanControl] = useState(false);
 
   const wsRef = useRef<PlanningPokerWebSocket | null>(null);
 
@@ -50,18 +56,39 @@ export default function RoomPage() {
   const safeRoomId = roomId || "unknown";
 
   // WebSocket connection
-  useEffect(() => {
-    if (!roomId) return;
+  const { user, isAuthenticated } = useAuth();
 
-    const ws = new PlanningPokerWebSocket(roomId);
+  useEffect(() => {
+    if (!roomId) {
+      setConnectionError("Room ID is missing");
+      setIsLoading(false);
+      return;
+    }
+
+    console.log("Initializing WebSocket connection for room:", roomId);
+
+    // Ensure we have an authenticated user
+    if (!isAuthenticated || !user) {
+      setConnectionError("Please log in to join the room");
+      setIsLoading(false);
+      return;
+    }
+
+    console.log("Current authenticated user:", user.username, "ID:", user.id);
+
+    // Use current user from auth context
+    const ws = new PlanningPokerWebSocket(roomId, user);
     wsRef.current = ws;
 
     // Set up event listeners
     ws.on("room_state", (data: RoomState) => {
       console.log("Room state received:", data);
+      console.log("Current user from room state:", data.current_user);
       setRoomData(data.room);
       setParticipants(data.participants);
       setIsHost(data.is_host);
+      setUserRole(data.user_role || "participant");
+      setCanControl(data.can_control || false);
       setIsLoading(false);
     });
 
@@ -140,16 +167,34 @@ export default function RoomPage() {
     ws.on("connection_failed", (data) => {
       toast.error("Connection failed: " + data.reason);
       setIsConnected(false);
+      setConnectionError(data.reason);
+
+      // If authentication failed, redirect to login
+      if (data.reason.includes("Authentication failed")) {
+        // Clear auth data and redirect
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        localStorage.removeItem("userData");
+        window.location.href = "/login";
+      }
     });
 
     // Connect to WebSocket
     ws.connect()
       .then(() => {
+        console.log(
+          "WebSocket connected successfully for user:",
+          user.username
+        );
         setIsConnected(true);
+        setConnectionError(null);
       })
       .catch((error) => {
         console.error("Failed to connect to WebSocket:", error);
-        toast.error("Failed to connect to room");
+        const errorMessage =
+          "Failed to connect to room. Please check your authentication.";
+        toast.error(errorMessage);
+        setConnectionError(errorMessage);
         setIsLoading(false);
       });
 
@@ -157,7 +202,7 @@ export default function RoomPage() {
     return () => {
       ws.disconnect();
     };
-  }, [roomId]);
+  }, [roomId, user, isAuthenticated]);
 
   const handleVote = (value: string) => {
     setSelectedCard(value);
@@ -186,6 +231,29 @@ export default function RoomPage() {
         <div className="text-center">
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
           <p className="mt-2">Connecting to room...</p>
+          {connectionError && (
+            <p className="mt-2 text-red-600 text-sm">{connectionError}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (connectionError && !isConnected) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600">Connection Error</h1>
+          <p className="mt-2 text-red-600">{connectionError}</p>
+          <p className="mt-2 text-zinc-500">
+            Make sure the backend server is running on localhost:8000
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Retry Connection
+          </button>
         </div>
       </div>
     );
@@ -204,28 +272,31 @@ export default function RoomPage() {
     );
   }
 
+  // Check if user can perform admin actions
+  const canPerformAdminActions = canControl || userRole === "admin";
+
   return (
     <div className="min-h-screen flex flex-col">
       <RoomHeader
         roomId={safeRoomId}
         participants={participants}
         isHost={isHost}
+        isAdmin={userRole === "admin"}
+        canControl={canPerformAdminActions}
         onSkipParticipant={handleSkipParticipant}
       />
 
       <main className="flex-1 flex flex-col p-4 md:p-8 max-w-5xl mx-auto w-full">
         <ConnectionStatus isConnected={isConnected} />
 
-        <motion.div
-          className="mb-8 text-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
-        >
+        <motion.div className="mb-8 text-center">
           <h1 className="text-2xl font-bold">Planning Session</h1>
           <p className="text-zinc-500">
             Room: <span className="font-mono font-bold">{roomData.code}</span>
             {isHost && <span className="ml-2 text-blue-600">(Host)</span>}
+            {userRole === "admin" && (
+              <span className="ml-2 text-red-600">(Admin)</span>
+            )}
           </p>
           <p className="text-zinc-500">Select a card to cast your vote</p>
         </motion.div>
@@ -291,6 +362,8 @@ export default function RoomPage() {
           isRevealed={isRevealed}
           selectedCard={selectedCard}
           isHost={isHost}
+          isAdmin={userRole === "admin"}
+          canControl={canPerformAdminActions}
           onReveal={handleReveal}
           onReset={handleReset}
           onStartRound={handleStartRound}

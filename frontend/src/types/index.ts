@@ -12,6 +12,8 @@ export interface RoomState {
   };
   participants: Participant[];
   is_host: boolean;
+  user_role?: "admin" | "participant";
+  can_control?: boolean;
 }
 
 export interface Participant {
@@ -21,6 +23,14 @@ export interface Participant {
   card_selection: string | null;
   has_voted: boolean;
   vote: number | null;
+}
+
+export interface User {
+  id: number;
+  username: string;
+  email: string;
+  role: "admin" | "participant";
+  is_admin: boolean;
 }
 
 export interface VotingStats {
@@ -34,34 +44,88 @@ export interface VotingStats {
 export class PlanningPokerWebSocket {
   private ws: WebSocket | null = null;
   private roomId: string;
+  private user: any;
   private listeners: Map<string, ((data: any) => void)[]> = new Map();
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
+  private maxReconnectAttempts = 3;
+  private reconnectDelay = 2000;
+  private isConnecting = false;
+  private isManuallyDisconnected = false;
 
-  constructor(roomId: string) {
+  constructor(roomId: string, user?: any) {
     this.roomId = roomId;
+    this.user = user;
   }
 
   connect(): Promise<void> {
+    if (this.isConnecting) {
+      return Promise.reject(new Error("Connection already in progress"));
+    }
+
+    this.isConnecting = true;
+    this.isManuallyDisconnected = false;
+
     return new Promise((resolve, reject) => {
-      const wsUrl = `${import.meta.env.VITE_WS_URL}/rooms/${this.roomId}/`;
+      const token = localStorage.getItem("access_token");
+
+      if (!token) {
+        this.isConnecting = false;
+        reject(new Error("No authentication token found"));
+        return;
+      }
+
+      const wsBaseUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
+      const wsUrl = `${wsBaseUrl}/ws/rooms/${this.roomId}/?token=${token}`;
+
+      console.log("Connecting to WebSocket:", wsUrl);
+
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.log("WebSocket connected");
+        console.log("WebSocket connected successfully");
         this.reconnectAttempts = 0;
+        this.isConnecting = false;
         resolve();
       };
 
       this.ws.onclose = (event) => {
         console.log("WebSocket disconnected:", event.code, event.reason);
-        this.handleReconnect();
+        this.isConnecting = false;
+
+        if (this.isManuallyDisconnected) {
+          return;
+        }
+
+        if (event.code === 4401) {
+          this.emit("connection_failed", {
+            reason: "Authentication failed. Please log in again.",
+          });
+          return;
+        }
+
+        if (event.code === 4404) {
+          this.emit("connection_failed", {
+            reason: "Room not found.",
+          });
+          return;
+        }
+
+        // Only attempt reconnection for network errors
+        if (event.code !== 1000 && event.code !== 1001) {
+          this.handleReconnect();
+        }
       };
 
       this.ws.onerror = (error) => {
         console.error("WebSocket error:", error);
-        reject(error);
+        this.isConnecting = false;
+
+        // Don't reject immediately - let onclose handle reconnection
+        setTimeout(() => {
+          if (this.ws?.readyState === WebSocket.CONNECTING) {
+            reject(new Error("Failed to connect to WebSocket"));
+          }
+        }, 5000);
       };
 
       this.ws.onmessage = (event) => {
@@ -76,26 +140,36 @@ export class PlanningPokerWebSocket {
   }
 
   disconnect() {
+    this.isManuallyDisconnected = true;
+    this.isConnecting = false;
     if (this.ws) {
-      this.ws.close();
+      this.ws.close(1000);
       this.ws = null;
     }
   }
 
   private handleReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+    if (
+      this.reconnectAttempts < this.maxReconnectAttempts &&
+      !this.isConnecting &&
+      !this.isManuallyDisconnected
+    ) {
       this.reconnectAttempts++;
       console.log(
         `Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`
       );
 
       setTimeout(() => {
-        this.connect().catch(console.error);
-      }, this.reconnectDelay * this.reconnectAttempts);
-    } else {
+        if (!this.isManuallyDisconnected) {
+          this.connect().catch((error) => {
+            console.error("Reconnection failed:", error);
+          });
+        }
+      }, this.reconnectDelay);
+    } else if (!this.isManuallyDisconnected) {
       console.error("Max reconnection attempts reached");
       this.emit("connection_failed", {
-        reason: "Max reconnection attempts reached",
+        reason: "Connection lost. Please refresh the page.",
       });
     }
   }

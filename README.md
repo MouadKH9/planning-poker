@@ -21,14 +21,14 @@ A real-time collaborative estimation tool for agile teams built with Django Chan
 - **WebSocket Communication** - Real-time updates across all participants
 - **Responsive Design** - Works seamlessly on desktop and mobile
 - **Guest Mode** - Join sessions without account creation
-- **Room Management** - Unique room codes for easy sharing
+- **Room Management** - Unique 6-character room codes for easy sharing
 - **Auto-reconnection** - Handles network interruptions gracefully
 
 ### 🎨 User Experience
 - **Intuitive Interface** - Clean, modern design with smooth animations
 - **Live Participant Status** - See who has voted in real-time
 - **Toast Notifications** - Non-intrusive feedback for all actions
-- **Drag & Drop Cards** - Smooth card selection experience
+- **Card Selection** - Smooth card selection experience with Fibonacci sequence
 - **Room Chat** - Built-in communication during sessions
 
 ## 🛠️ Tech Stack
@@ -114,6 +114,7 @@ npm run dev
 - **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000/api/
 - **Django Admin**: http://localhost:8000/admin/
+- **Authentication**: http://localhost:8000/api/auth/
 
 ## 🐳 Docker Setup
 
@@ -161,7 +162,7 @@ planning-poker/
 
 ### Creating a Room
 1. Visit the application homepage
-2. Click "Create New Room"
+2. Click "Create New Room" (requires authentication)
 3. Share the generated room code with your team
 
 ### Joining a Room
@@ -181,7 +182,43 @@ planning-poker/
 3. Host reveals cards to see results
 4. View statistics and discuss estimates
 
+### Troubleshooting
+
+#### WebSocket Connection Issues
+If you encounter WebSocket connection errors:
+
+1. **Check Environment Variables**: Ensure `VITE_WS_URL` is set correctly
+   ```bash
+   # In frontend/.env
+   VITE_WS_URL=ws://localhost:8000
+   ```
+
+2. **Verify Backend is Running**: Make sure Django server is running on the correct port
+   ```bash
+   python manage.py runserver
+   ```
+
+3. **Check WebSocket Routing**: Ensure Django Channels is properly configured
+
+#### Room Not Found Errors
+If rooms are created but not accessible:
+
+1. **Verify Database Connection**: Check if PostgreSQL is running
+2. **Check Room Code**: Ensure the room code is correct (case-sensitive)
+3. **API Endpoints**: Verify the room API endpoints are working
+   ```bash
+   curl http://localhost:8000/api/rooms/
+   ```
+
 ## 🔧 API Endpoints
+
+### Authentication
+```http
+POST   /api/auth/login/     # User login
+POST   /api/auth/register/  # User registration
+POST   /api/auth/refresh/   # Token refresh
+GET    /api/auth/profile/   # User profile
+```
 
 ### Rooms
 ```http
@@ -196,20 +233,29 @@ GET    /api/rooms/{id}/logs/     # Get session history
 ### WebSocket Events
 ```javascript
 // Incoming events
-'room_state'        // Initial room state
-'vote_submitted'    // User voted
-'cards_revealed'    // Cards revealed
-'votes_reset'       // Votes cleared
-'user_connected'    // User joined
-'user_disconnected' // User left
+'room_state'        // Initial room state with user role and permissions
+'vote_submitted'    // User voted (authenticated users only)
+'cards_revealed'    // Cards revealed by host/admin
+'votes_reset'       // Votes cleared by host/admin
+'user_connected'    // Authenticated user joined
+'user_disconnected' // Authenticated user left
+'connection_failed' // Authentication or connection failed
 
 // Outgoing events
-'submit_vote'       // Submit vote
-'reveal_cards'      // Reveal all cards
-'reset_votes'       // Reset all votes
-'start_round'       // Start new round
+'submit_vote'       // Submit vote (requires authentication)
+'reveal_cards'      // Reveal all cards (host/admin only)
+'reset_votes'       // Reset all votes (host/admin only)
+'start_round'       // Start new round (host/admin only)
+'skip_participant'  // Skip participant (host/admin only)
 'chat_message'      // Send chat message
+'join_room'         // Join room (for initial connection)
 ```
+
+### Authentication Requirements
+- **WebSocket connections require a valid JWT token**
+- **Guest mode has been removed for security**
+- **Only authenticated users can vote and participate**
+- **Room hosts and admin users can control game flow**
 
 ## 🧪 Development
 

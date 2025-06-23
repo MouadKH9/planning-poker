@@ -4,34 +4,58 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from planning_poker.models import Room, Participant
 from planning_poker.fields import STATUS_CHOICES
+from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from urllib.parse import parse_qs
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
 
 
 class RoomConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_code = self.scope["url_route"]["kwargs"]["room_id"]
         self.room_group_name = f"room_{self.room_code}"
-        self.user = self.scope.get("user")
 
-        # Get room info
+        # Authenticate user from JWT token in query string
+        self.user = await self.authenticate_user_from_token()
+        if not self.user:
+            logger.info(f"Guest user connecting to room {self.room_code}")
+            self.user = type(
+                "GuestUser",
+                (),
+                {
+                    "id": None,
+                    "username": "Guest",
+                    "is_authenticated": False,
+                    "is_anonymous": True,
+                },
+            )()
+        else:
+            self.scope["user"] = self.user
+
+        logger.info(
+            f"User {getattr(self.user, 'username', 'Guest')} connecting to room {self.room_code}"
+        )
+
         try:
-            # Try to get room by ID first, then by code
             self.room = await self.get_room_by_id_or_code(self.room_code)
             if not self.room:
                 await self.close(code=4404)
                 return
 
-            # Join room group
+            if self.user and getattr(self.user, "is_authenticated", False):
+                await self.get_or_create_participant(self.user, self.room)
+                logger.info(
+                    f"Participant created/found: {self.user.username} in room {self.room.code}"
+                )
+
             await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-
             await self.accept()
-
-            # Send current room state to the newly connected user
             await self.send_room_state()
 
-            # Notify others that a user connected (only if authenticated)
-            if self.user and self.user.is_authenticated:
+            if self.user and getattr(self.user, "is_authenticated", False):
                 await self.channel_layer.group_send(
                     self.room_group_name,
                     {
@@ -40,44 +64,25 @@ class RoomConsumer(AsyncWebsocketConsumer):
                         "username": self.user.username,
                     },
                 )
-            else:
-                # For unauthenticated users, we'll use a guest identifier
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "user_connected",
-                        "user_id": None,
-                        "username": "Guest",
-                    },
-                )
-
         except Exception as e:
             logger.error(f"Error connecting to room {self.room_code}: {e}")
             await self.close(code=4500)
 
     async def disconnect(self, close_code):
-        # Notify others that user disconnected
+        if (
+            hasattr(self, "room_group_name")
+            and self.user
+            and getattr(self.user, "is_authenticated", False)
+        ):
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "user_disconnected",
+                    "user_id": self.user.id,
+                    "username": self.user.username,
+                },
+            )
         if hasattr(self, "room_group_name"):
-            if self.user and self.user.is_authenticated:
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "user_disconnected",
-                        "user_id": self.user.id,
-                        "username": self.user.username,
-                    },
-                )
-            else:
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        "type": "user_disconnected",
-                        "user_id": None,
-                        "username": "Guest",
-                    },
-                )
-
-            # Leave room group
             await self.channel_layer.group_discard(
                 self.room_group_name, self.channel_name
             )
@@ -103,7 +108,6 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 await self.handle_join_room(data)
             else:
                 await self.send_error("Unknown message type")
-
         except json.JSONDecodeError:
             await self.send_error("Invalid JSON")
         except Exception as e:
@@ -111,57 +115,31 @@ class RoomConsumer(AsyncWebsocketConsumer):
             await self.send_error("Internal server error")
 
     async def handle_submit_vote(self, data):
-        """Handle user vote submission"""
         card_value = data.get("card_value")
-
         if not card_value:
             await self.send_error("Card value is required")
             return
-
-        # For now, allow unauthenticated users to vote (you can change this later)
-        if not self.user or not self.user.is_authenticated:
-            # For demo purposes, we'll just broadcast the vote without saving it
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "vote_submitted",
-                    "user_id": None,
-                    "username": "Guest",
-                    "has_voted": True,
-                },
-            )
+        if not self.user or not getattr(self.user, "is_authenticated", False):
+            await self.send_error("Authentication required to vote")
             return
-
-        # Update participant's vote
         participant = await self.get_or_create_participant(self.user, self.room)
         await self.update_participant_vote(participant, card_value)
-
-        # Broadcast vote submission (without revealing the actual value)
         await self.channel_layer.group_send(
             self.room_group_name,
             {
                 "type": "vote_submitted",
                 "user_id": self.user.id,
                 "username": self.user.username,
-                "has_voted": True,
             },
         )
 
     async def handle_reveal_cards(self, data):
-        """Handle reveal cards request"""
-        # For demo purposes, allow anyone to reveal cards
-        # In production, you'd want to check if the user is the host
-
-        # Get all participants and their votes
+        if not await self.can_control_game(self.room, self.user):
+            await self.send_error("Only admins or room hosts can reveal cards")
+            return
         participants_data = await self.get_participants_with_votes(self.room)
-
-        # Calculate statistics
         stats = await self.calculate_voting_stats(participants_data)
-
-        # Update room status
         await self.update_room_status(self.room, STATUS_CHOICES.COMPLETED)
-
-        # Broadcast revealed cards
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -172,16 +150,11 @@ class RoomConsumer(AsyncWebsocketConsumer):
         )
 
     async def handle_reset_votes(self, data):
-        """Handle reset votes request"""
-        # For demo purposes, allow anyone to reset votes
-
-        # Reset all participant votes
+        if not await self.can_control_game(self.room, self.user):
+            await self.send_error("Only admins or room hosts can reset votes")
+            return
         await self.reset_all_votes(self.room)
-
-        # Update room status
         await self.update_room_status(self.room, STATUS_CHOICES.ACTIVE)
-
-        # Broadcast reset
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -190,17 +163,14 @@ class RoomConsumer(AsyncWebsocketConsumer):
         )
 
     async def handle_skip_participant(self, data):
-        """Handle skip participant request"""
         participant_id = data.get("participant_id")
-
         if not participant_id:
             await self.send_error("Participant ID is required")
             return
-
-        # Set participant as skipped
-        await self.skip_participant(participant_id, self.room)
-
-        # Broadcast skip
+        if not await self.can_control_game(self.room, self.user):
+            await self.send_error("Only admins or room hosts can skip participants")
+            return
+        await self.skip_participant_db(participant_id, self.room)
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -210,12 +180,11 @@ class RoomConsumer(AsyncWebsocketConsumer):
         )
 
     async def handle_start_round(self, data):
-        """Handle start new round request"""
-        # Reset votes and update room status
+        if not await self.can_control_game(self.room, self.user):
+            await self.send_error("Only admins or room hosts can start rounds")
+            return
         await self.reset_all_votes(self.room)
         await self.update_room_status(self.room, STATUS_CHOICES.ACTIVE)
-
-        # Broadcast new round
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -225,21 +194,15 @@ class RoomConsumer(AsyncWebsocketConsumer):
         )
 
     async def handle_chat_message(self, data):
-        """Handle chat message"""
         message = data.get("message", "").strip()
-
         if not message:
             await self.send_error("Message cannot be empty")
             return
-
         username = "Guest"
         user_id = None
-
         if self.user and self.user.is_authenticated:
             username = self.user.username
             user_id = self.user.id
-
-        # Broadcast chat message
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -252,9 +215,46 @@ class RoomConsumer(AsyncWebsocketConsumer):
         )
 
     async def handle_join_room(self, data):
-        """Handle join room request for guest users"""
-        # Send room state
         await self.send_room_state()
+
+    async def send_room_state(self):
+        participants = await self.get_participants_with_votes(self.room)
+        is_host = (
+            self.room.host == self.user
+            if self.user and getattr(self.user, "is_authenticated", False)
+            else False
+        )
+        user_role = (
+            await self.get_user_role_string(self.user)
+            if self.user and getattr(self.user, "is_authenticated", False)
+            else "participant"
+        )
+        can_control = (
+            await self.can_control_game(self.room, self.user)
+            if self.user and getattr(self.user, "is_authenticated", False)
+            else False
+        )
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "room_state",
+                    "room": {
+                        "id": self.room.id,
+                        "code": self.room.code,
+                        "status": self.room.status,
+                        "host_username": self.room.host.username,
+                    },
+                    "participants": participants,
+                    "is_host": is_host,
+                    "user_role": user_role,
+                    "can_control": can_control,
+                    "current_user": {
+                        "id": self.user.id if self.user else None,
+                        "username": self.user.username if self.user else "Guest",
+                    },
+                }
+            )
+        )
 
     # WebSocket event handlers
     async def user_connected(self, event):
@@ -286,7 +286,6 @@ class RoomConsumer(AsyncWebsocketConsumer):
                     "type": "vote_submitted",
                     "user_id": event["user_id"],
                     "username": event["username"],
-                    "has_voted": event["has_voted"],
                 }
             )
         )
@@ -355,62 +354,80 @@ class RoomConsumer(AsyncWebsocketConsumer):
             )
         )
 
-    async def send_room_state(self):
-        """Send current room state to the user"""
-        participants = await self.get_participants_with_votes(self.room)
-
-        is_host = False
-        if self.user and self.user.is_authenticated:
-            is_host = await self.is_room_host(self.user, self.room)
-
-        await self.send(
-            text_data=json.dumps(
-                {
-                    "type": "room_state",
-                    "room": {
-                        "id": self.room.id,
-                        "code": self.room.code,
-                        "status": self.room.status,
-                        "host_username": self.room.host.username,
-                    },
-                    "participants": participants,
-                    "is_host": is_host,
-                }
-            )
-        )
-
     def get_current_timestamp(self):
         from django.utils import timezone
 
         return timezone.now().isoformat()
 
-    # Database operations (async wrappers)
+    # Database methods
+    @database_sync_to_async
+    def authenticate_user_from_token(self):
+        try:
+            query_string = self.scope.get("query_string", b"").decode()
+            query_params = parse_qs(query_string)
+            token = query_params.get("token", [None])[0]
+            if not token:
+                logger.info("No token provided in WebSocket connection")
+                return None
+            access_token = AccessToken(token)
+            user_id = access_token["user_id"]
+            user = User.objects.select_related("role").get(id=user_id)
+            logger.info(f"Authenticated user: {user.username}")
+            return user
+        except (InvalidToken, TokenError) as e:
+            logger.warning(f"Invalid token provided: {e}")
+            return None
+        except User.DoesNotExist:
+            logger.warning(f"User with ID {user_id} not found")
+            return None
+        except Exception as e:
+            logger.error(f"Error authenticating user: {e}")
+            return None
+
     @database_sync_to_async
     def get_room_by_id_or_code(self, room_identifier):
-        """Try to get room by ID first, then by code"""
         try:
-            # Try to get by ID first (if the identifier is numeric)
-            if room_identifier.isdigit():
-                return Room.objects.get(id=int(room_identifier))
-            else:
-                # Try to get by code
-                return Room.objects.get(code=room_identifier)
+            return Room.objects.select_related("host").get(code=room_identifier)
         except Room.DoesNotExist:
-            # Try the other way around
             try:
-                if room_identifier.isdigit():
-                    return Room.objects.get(code=room_identifier)
-                else:
-                    return Room.objects.get(id=int(room_identifier))
+                return Room.objects.select_related("host").get(id=room_identifier)
             except (Room.DoesNotExist, ValueError):
                 return None
 
     @database_sync_to_async
     def get_or_create_participant(self, user, room):
         participant, created = Participant.objects.get_or_create(
-            user=user, room=room, defaults={"card_selection": None}
+            user=user,
+            room=room,
+            defaults={
+                "card_selection": None,
+            },
         )
         return participant
+
+    @database_sync_to_async
+    def get_participants_with_votes(self, room):
+        try:
+            participants = list(
+                Participant.objects.filter(room=room)
+                .select_related("user", "user__role")
+                .values(
+                    "id",
+                    "user_id",
+                    "user__username",
+                    "card_selection",
+                    "user__role__role",
+                )
+            )
+            for p in participants:
+                p["username"] = p.pop("user__username")
+                p["vote"] = None
+                p["user_role"] = p.pop("user__role__role") or "participant"
+                p["has_voted"] = bool(p["card_selection"])
+            return participants
+        except Exception as e:
+            logger.error(f"Error getting participants: {e}")
+            return []
 
     @database_sync_to_async
     def update_participant_vote(self, participant, card_value):
@@ -418,40 +435,120 @@ class RoomConsumer(AsyncWebsocketConsumer):
         participant.save()
 
     @database_sync_to_async
-    def get_participants_with_votes(self, room):
-        participants = Participant.objects.filter(room=room).select_related("user")
-        return [
-            {
-                "id": p.id,
-                "user_id": p.user.id,
-                "username": p.user.username,
-                "card_selection": p.card_selection,
-                "has_voted": p.card_selection is not None,
-            }
-            for p in participants
-        ]
-
-    @database_sync_to_async
-    def is_room_host(self, user, room):
-        return user.is_authenticated and room.host == user
-
-    @database_sync_to_async
     def reset_all_votes(self, room):
-        Participant.objects.filter(room=room).update(card_selection=None)
+        try:
+            Participant.objects.filter(room=room).update(card_selection=None)
+        except Exception as e:
+            logger.error(f"Error resetting votes: {e}")
 
     @database_sync_to_async
     def update_room_status(self, room, status):
-        room.status = status
-        room.save()
+        try:
+            room.status = status
+            room.save()
+        except Exception as e:
+            logger.error(f"Error updating room status: {e}")
 
     @database_sync_to_async
-    def skip_participant(self, participant_id, room):
+    def calculate_voting_stats(self, participants_data):
+        numeric_votes = []
+        for participant in participants_data:
+            card_value = participant.get("card_selection")
+            if card_value and card_value != "SKIPPED":
+                try:
+                    if card_value.replace(".", "").isdigit():
+                        numeric_votes.append(float(card_value))
+                except (ValueError, AttributeError):
+                    continue
+        if not numeric_votes:
+            return {
+                "average": 0,
+                "min": 0,
+                "max": 0,
+                "consensus": False,
+                "total_votes": len(
+                    [p for p in participants_data if p.get("card_selection")]
+                ),
+            }
+        average = sum(numeric_votes) / len(numeric_votes)
+        min_vote = min(numeric_votes)
+        max_vote = max(numeric_votes)
+        consensus = len(set(numeric_votes)) == 1
+        return {
+            "average": round(average, 2),
+            "min": min_vote,
+            "max": max_vote,
+            "consensus": consensus,
+            "total_votes": len(
+                [p for p in participants_data if p.get("card_selection")]
+            ),
+        }
+
+    @database_sync_to_async
+    def skip_participant_db(self, participant_id, room):
         try:
-            participant = Participant.objects.get(id=participant_id, room=room)
-            participant.card_selection = "SKIPPED"
-            participant.save()
-        except Participant.DoesNotExist:
-            pass
+            Participant.objects.filter(id=participant_id, room=room).update(
+                card_selection="SKIPPED"
+            )
+        except Exception as e:
+            logger.error(f"Error skipping participant {participant_id}: {e}")
+
+    @database_sync_to_async
+    def get_user_role_string(self, user):
+        try:
+            user_with_role = User.objects.select_related("role").get(id=user.id)
+            if hasattr(user_with_role, "role") and user_with_role.role:
+                return user_with_role.role.role
+            if getattr(user_with_role, "is_superuser", False) or getattr(
+                user_with_role, "is_staff", False
+            ):
+                return "admin"
+            return "participant"
+        except User.DoesNotExist:
+            logger.warning(f"User {user.id} not found when getting role")
+            return "participant"
+        except Exception as e:
+            logger.warning(f"Error getting user role: {e}")
+            return "participant"
+
+    @database_sync_to_async
+    def can_control_game(self, room, user):
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        try:
+            if room.host == user:
+                return True
+            user_with_role = User.objects.select_related("role").get(id=user.id)
+            if hasattr(user_with_role, "role") and user_with_role.role:
+                return user_with_role.role.role == "admin"
+            if getattr(user_with_role, "is_superuser", False) or getattr(
+                user_with_role, "is_staff", False
+            ):
+                return True
+            return False
+        except User.DoesNotExist:
+            logger.warning(f"User {user.id} not found when checking game control")
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking game control permissions: {e}")
+            return room.host == user
+
+    @database_sync_to_async
+    def reset_all_votes(self, room):
+        """Reset all votes for participants in the room"""
+        try:
+            Participant.objects.filter(room=room).update(card_selection=None)
+        except Exception as e:
+            logger.error(f"Error resetting votes: {e}")
+
+    @database_sync_to_async
+    def update_room_status(self, room, status):
+        """Update room status"""
+        try:
+            room.status = status
+            room.save()
+        except Exception as e:
+            logger.error(f"Error updating room status: {e}")
 
     @database_sync_to_async
     def calculate_voting_stats(self, participants_data):
@@ -493,3 +590,240 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 [p for p in participants_data if p.get("card_selection")]
             ),
         }
+
+    @database_sync_to_async
+    def get_user_role_string(self, user):
+        """Get user role as string"""
+        try:
+            # Refresh the user from database to get latest role information
+            user_with_role = User.objects.select_related("role").get(id=user.id)
+
+            # Check if user has a role relationship
+            if hasattr(user_with_role, "role") and user_with_role.role:
+                return user_with_role.role.role
+
+            # Check if user has is_superuser or is_staff flags
+            if getattr(user_with_role, "is_superuser", False) or getattr(
+                user_with_role, "is_staff", False
+            ):
+                return "admin"
+
+            return "participant"
+        except User.DoesNotExist:
+            logger.warning(f"User {user.id} not found when getting role")
+            return "participant"
+        except Exception as e:
+            logger.warning(f"Error getting user role: {e}")
+            return "participant"
+
+    @database_sync_to_async
+    def can_control_game(self, room, user):
+        """Check if user can control game flow"""
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+
+        try:
+            # Check if user is room host first
+            if room.host == user:
+                return True
+
+            # Get fresh user data with role information
+            user_with_role = User.objects.select_related("role").get(id=user.id)
+
+            # Check role-based permissions
+            if hasattr(user_with_role, "role") and user_with_role.role:
+                return user_with_role.role.role == "admin"
+
+            # Check Django built-in admin flags as fallback
+            if getattr(user_with_role, "is_superuser", False) or getattr(
+                user_with_role, "is_staff", False
+            ):
+                return True
+
+            return False
+        except User.DoesNotExist:
+            logger.warning(f"User {user.id} not found when checking game control")
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking game control permissions: {e}")
+            # Fallback to host check only
+            return room.host == user
+
+    @database_sync_to_async
+    def skip_participant_db(self, participant_id, room):
+        """Set participant as skipped in database"""
+        try:
+            Participant.objects.filter(id=participant_id, room=room).update(
+                card_selection="SKIPPED"
+            )
+        except Exception as e:
+            logger.error(f"Error skipping participant {participant_id}: {e}")
+
+    async def reveal_cards(self, event):
+        """Reveal all cards - only admin or host can do this"""
+        user = self.scope["user"]
+        room = await self.get_room()
+
+        if not await self.can_control_game(room, user):
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "error",
+                        "message": "Only admins or room hosts can reveal cards",
+                    }
+                )
+            )
+            return
+
+        # Get all participants and their votes
+        participants_data = await self.get_participants_with_votes(self.room)
+
+        # Calculate statistics
+        stats = await self.calculate_voting_stats(participants_data)
+
+        # Update room status
+        await self.update_room_status(self.room, STATUS_CHOICES.COMPLETED)
+
+        # Broadcast revealed cards
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "cards_revealed",
+                "participants": participants_data,
+                "statistics": stats,
+            },
+        )
+
+    async def reset_votes(self, event):
+        """Reset all votes - only admin or host can do this"""
+        user = self.scope["user"]
+        room = await self.get_room()
+
+        if not await self.can_control_game(room, user):
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "error",
+                        "message": "Only admins or room hosts can reset votes",
+                    }
+                )
+            )
+            return
+
+        # Reset all participant votes
+        await self.reset_all_votes(self.room)
+
+        # Update room status
+        await self.update_room_status(self.room, STATUS_CHOICES.ACTIVE)
+
+        # Broadcast reset
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "votes_reset",
+            },
+        )
+
+    @database_sync_to_async
+    def skip_participant_db(self, participant_id, room):
+        """Set participant as skipped in database"""
+        try:
+            Participant.objects.filter(id=participant_id, room=room).update(
+                card_selection="SKIPPED"
+            )
+        except Exception as e:
+            logger.error(f"Error skipping participant {participant_id}: {e}")
+
+    async def start_round(self, event):
+        """Start a new round - only admin or host can do this"""
+        user = self.scope["user"]
+        room = await self.get_room()
+
+        if not await self.can_control_game(room, user):
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "error",
+                        "message": "Only admins or room hosts can start rounds",
+                    }
+                )
+            )
+            return
+
+        # Reset votes and update room status
+        await self.reset_all_votes(self.room)
+        await self.update_room_status(self.room, STATUS_CHOICES.ACTIVE)
+
+        # Broadcast new round
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "round_started",
+                "story_title": event.get("story_title", ""),
+            },
+        )
+
+    @database_sync_to_async
+    def get_room(self):
+        """Get the current room from database"""
+        return self.room
+
+    async def skip_participant(self, event):
+        """Skip a participant - only admin or host can do this"""
+        user = self.scope["user"]
+        room = await self.get_room()
+
+        if not await self.can_control_game(room, user):
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "error",
+                        "message": "Only admins or room hosts can skip participants",
+                    }
+                )
+            )
+            return
+
+        participant_id = event.get("participant_id")
+
+        if not participant_id:
+            await self.send_error("Participant ID is required")
+            return
+
+        # Set participant as skipped
+        await self.skip_participant(participant_id, self.room)
+
+        # Broadcast skip
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "participant_skipped",
+                "participant_id": participant_id,
+            },
+        )
+
+        participant_id = event.get("participant_id")
+
+        if not participant_id:
+            await self.send_error("Participant ID is required")
+            return
+
+        # Set participant as skipped
+        await self.skip_participant(participant_id, self.room)
+
+        # Broadcast skip
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "participant_skipped",
+                "participant_id": participant_id,
+            },
+        )
+        # Broadcast skip
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                "type": "participant_skipped",
+                "participant_id": participant_id,
+            },
+        )

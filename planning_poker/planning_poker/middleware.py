@@ -5,6 +5,7 @@ from django.contrib.auth import login
 class AutoAuthMiddleware:
     """
     Middleware to automatically authenticate users for development.
+    Only auto-authenticates if no Authorization header is present.
     Remove this in production!
     """
 
@@ -12,8 +13,10 @@ class AutoAuthMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # Auto-login as admin user for development
-        if not request.user.is_authenticated:
+        # Only auto-login if there's no Authorization header and user is not authenticated
+        auth_header = request.META.get("HTTP_AUTHORIZATION")
+
+        if not auth_header and not request.user.is_authenticated:
             try:
                 admin_user = User.objects.get(username="admin")
                 login(request, admin_user)

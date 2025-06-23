@@ -46,6 +46,7 @@ export function RoomHeader({
         </Button>
         <div className="font-bold text-xl">PlanningPoker</div>
       </div>
+
       <div className="flex items-center gap-4">
         <TooltipProvider>
           <Tooltip>
@@ -67,7 +68,8 @@ export function RoomHeader({
         </TooltipProvider>
 
         {/* Remove the skip button from header since it should be per participant */}
-        {isHost && (
+        {/* Temporarily disable settings until route is properly implemented */}
+        {/* {isHost && (
           <Button
             variant="secondary"
             size="sm"
@@ -75,7 +77,7 @@ export function RoomHeader({
           >
             Settings
           </Button>
-        )}
+        )} */}
 
         <div className="flex -space-x-2">
           {participants.map((participant) => (

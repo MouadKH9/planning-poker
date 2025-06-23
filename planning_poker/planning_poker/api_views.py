@@ -1,13 +1,13 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
+from planning_poker.serializers import RoomSerializer, SessionLogSerializer
+from planning_poker.utils import generate_unique_room_code
 
 from planning_poker.models import Room, Participant, SessionLog
 from planning_poker.fields import STATUS_CHOICES
-from planning_poker.serializers import RoomSerializer, SessionLogSerializer
-from planning_poker.utils import generate_unique_room_code
 
 
 class RoomViewSet(viewsets.ModelViewSet):
@@ -17,15 +17,15 @@ class RoomViewSet(viewsets.ModelViewSet):
 
     queryset = Room.objects.all()
     serializer_class = RoomSerializer
-    
+
     def get_permissions(self):
         """
         Instantiates and returns the list of permissions that this view requires.
         """
-        if self.action == 'create':
+        if self.action == "create":
             self.permission_classes = [IsAuthenticated]
         return super().get_permissions()
-    
+
     def create(self, request, *args, **kwargs):
         """Create a new room (POST /api/rooms/)"""
         host = request.user  # This would require authentication
@@ -40,7 +40,24 @@ class RoomViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, pk=None, *args, **kwargs):
         """Fetch room details (GET /api/rooms/{id}/)"""
-        room = get_object_or_404(Room, id=pk)
+        # Try to get by code first, then by ID
+        room = None
+        try:
+            # Try by code first (most common case for room access)
+            room = Room.objects.get(code=pk)
+        except Room.DoesNotExist:
+            try:
+                # Try by ID if it's numeric
+                if pk.isdigit():
+                    room = Room.objects.get(id=int(pk))
+            except Room.DoesNotExist:
+                pass
+
+        if not room:
+            return Response(
+                {"error": "Room not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
         participants = Participant.objects.filter(room=room)
 
         return Response(
@@ -167,3 +184,51 @@ class RoomViewSet(viewsets.ModelViewSet):
         return Response(
             {"room_id": room.id, "room_code": room.code, "logs": serializer.data}
         )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="session-logs",
+        permission_classes=[IsAuthenticated],
+    )
+    def session_logs(self, request, pk=None):
+        """
+        Expose all session logs (votes/results) for a room to the room creator (host).
+        GET /api/rooms/{id}/session-logs/
+        """
+        room = get_object_or_404(Room, id=pk)
+        if room.host != request.user:
+            return Response(
+                {"error": "Only the room creator can view session logs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        logs = SessionLog.objects.filter(room=room).order_by("-timestamp")
+        serializer = SessionLogSerializer(logs, many=True)
+        return Response(serializer.data)
+
+
+@api_view(["GET"])
+def get_room_by_code(request, room_code):
+    """Get room by code (GET /api/rooms/code/{code}/)"""
+    try:
+        room = Room.objects.get(code=room_code)
+        participants = Participant.objects.filter(room=room)
+
+        return Response(
+            {
+                "id": room.id,
+                "code": room.code,
+                "status": room.status,
+                "host": room.host.username,
+                "participants": [
+                    {
+                        "id": p.id,
+                        "username": p.user.username,
+                        "has_selected": p.card_selection is not None,
+                    }
+                    for p in participants
+                ],
+            }
+        )
+    except Room.DoesNotExist:
+        return Response({"error": "Room not found"}, status=status.HTTP_404_NOT_FOUND)
