@@ -2,8 +2,8 @@ import json
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from planning_poker.models import Room, Participant
-from planning_poker.fields import STATUS_CHOICES
+from planning_poker.models import Room, Participant, SessionLog
+from planning_poker.fields import STATUS_CHOICES, POINT_SYSTEMS, POINT_SYSTEM_CARDS
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
@@ -122,8 +122,17 @@ class RoomConsumer(AsyncWebsocketConsumer):
         if not self.user or not getattr(self.user, "is_authenticated", False):
             await self.send_error("Authentication required to vote")
             return
+
+        # Validate card value against room's point system
+        valid_cards = await self.get_room_card_values(self.room)
+        if card_value not in valid_cards:
+            await self.send_error("Invalid card value for this room's point system")
+            return
+
         participant = await self.get_or_create_participant(self.user, self.room)
         await self.update_participant_vote(participant, card_value)
+
+        # Broadcast vote submission
         await self.channel_layer.group_send(
             self.room_group_name,
             {
@@ -133,12 +142,20 @@ class RoomConsumer(AsyncWebsocketConsumer):
             },
         )
 
+        # Check for auto-reveal if enabled and all participants have voted
+        if await self.should_auto_reveal(self.room):
+            await self.auto_reveal_cards()
+
     async def handle_reveal_cards(self, data):
         if not await self.can_control_game(self.room, self.user):
             await self.send_error("Only admins or room hosts can reveal cards")
             return
         participants_data = await self.get_participants_with_votes(self.room)
         stats = await self.calculate_voting_stats(participants_data)
+
+        # Create session log when cards are revealed
+        await self.create_session_log(self.room, stats, participants_data)
+
         await self.update_room_status(self.room, STATUS_CHOICES.COMPLETED)
         await self.channel_layer.group_send(
             self.room_group_name,
@@ -219,6 +236,7 @@ class RoomConsumer(AsyncWebsocketConsumer):
 
     async def send_room_state(self):
         participants = await self.get_participants_with_votes(self.room)
+        card_values = await self.get_room_card_values(self.room)
         is_host = (
             self.room.host == self.user
             if self.user and getattr(self.user, "is_authenticated", False)
@@ -241,10 +259,13 @@ class RoomConsumer(AsyncWebsocketConsumer):
                     "room": {
                         "id": self.room.id,
                         "code": self.room.code,
+                        "project_name": self.room.project_name,
+                        "point_system": self.room.point_system,
                         "status": self.room.status,
                         "host_username": self.room.host.username,
                     },
                     "participants": participants,
+                    "card_values": card_values,
                     "is_host": is_host,
                     "user_role": user_role,
                     "can_control": can_control,
@@ -436,105 +457,6 @@ class RoomConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def reset_all_votes(self, room):
-        try:
-            Participant.objects.filter(room=room).update(card_selection=None)
-        except Exception as e:
-            logger.error(f"Error resetting votes: {e}")
-
-    @database_sync_to_async
-    def update_room_status(self, room, status):
-        try:
-            room.status = status
-            room.save()
-        except Exception as e:
-            logger.error(f"Error updating room status: {e}")
-
-    @database_sync_to_async
-    def calculate_voting_stats(self, participants_data):
-        numeric_votes = []
-        for participant in participants_data:
-            card_value = participant.get("card_selection")
-            if card_value and card_value != "SKIPPED":
-                try:
-                    if card_value.replace(".", "").isdigit():
-                        numeric_votes.append(float(card_value))
-                except (ValueError, AttributeError):
-                    continue
-        if not numeric_votes:
-            return {
-                "average": 0,
-                "min": 0,
-                "max": 0,
-                "consensus": False,
-                "total_votes": len(
-                    [p for p in participants_data if p.get("card_selection")]
-                ),
-            }
-        average = sum(numeric_votes) / len(numeric_votes)
-        min_vote = min(numeric_votes)
-        max_vote = max(numeric_votes)
-        consensus = len(set(numeric_votes)) == 1
-        return {
-            "average": round(average, 2),
-            "min": min_vote,
-            "max": max_vote,
-            "consensus": consensus,
-            "total_votes": len(
-                [p for p in participants_data if p.get("card_selection")]
-            ),
-        }
-
-    @database_sync_to_async
-    def skip_participant_db(self, participant_id, room):
-        try:
-            Participant.objects.filter(id=participant_id, room=room).update(
-                card_selection="SKIPPED"
-            )
-        except Exception as e:
-            logger.error(f"Error skipping participant {participant_id}: {e}")
-
-    @database_sync_to_async
-    def get_user_role_string(self, user):
-        try:
-            user_with_role = User.objects.select_related("role").get(id=user.id)
-            if hasattr(user_with_role, "role") and user_with_role.role:
-                return user_with_role.role.role
-            if getattr(user_with_role, "is_superuser", False) or getattr(
-                user_with_role, "is_staff", False
-            ):
-                return "admin"
-            return "participant"
-        except User.DoesNotExist:
-            logger.warning(f"User {user.id} not found when getting role")
-            return "participant"
-        except Exception as e:
-            logger.warning(f"Error getting user role: {e}")
-            return "participant"
-
-    @database_sync_to_async
-    def can_control_game(self, room, user):
-        if not user or not getattr(user, "is_authenticated", False):
-            return False
-        try:
-            if room.host == user:
-                return True
-            user_with_role = User.objects.select_related("role").get(id=user.id)
-            if hasattr(user_with_role, "role") and user_with_role.role:
-                return user_with_role.role.role == "admin"
-            if getattr(user_with_role, "is_superuser", False) or getattr(
-                user_with_role, "is_staff", False
-            ):
-                return True
-            return False
-        except User.DoesNotExist:
-            logger.warning(f"User {user.id} not found when checking game control")
-            return False
-        except Exception as e:
-            logger.warning(f"Error checking game control permissions: {e}")
-            return room.host == user
-
-    @database_sync_to_async
-    def reset_all_votes(self, room):
         """Reset all votes for participants in the room"""
         try:
             Participant.objects.filter(room=room).update(card_selection=None)
@@ -590,6 +512,97 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 [p for p in participants_data if p.get("card_selection")]
             ),
         }
+
+    @database_sync_to_async
+    def get_user_role_string(self, user):
+        """Get user role as string"""
+        try:
+            user_with_role = User.objects.select_related("role").get(id=user.id)
+
+            if hasattr(user_with_role, "role") and user_with_role.role:
+                return user_with_role.role.role
+
+            if getattr(user_with_role, "is_superuser", False) or getattr(
+                user_with_role, "is_staff", False
+            ):
+                return "admin"
+
+            return "participant"
+        except User.DoesNotExist:
+            logger.warning(f"User {user.id} not found when getting role")
+            return "participant"
+        except Exception as e:
+            logger.warning(f"Error getting user role: {e}")
+            return "participant"
+
+    @database_sync_to_async
+    def can_control_game(self, room, user):
+        """Check if user can control game flow"""
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+
+        try:
+            if room.host == user:
+                return True
+
+            user_with_role = User.objects.select_related("role").get(id=user.id)
+
+            if hasattr(user_with_role, "role") and user_with_role.role:
+                return user_with_role.role.role == "admin"
+
+            if getattr(user_with_role, "is_superuser", False) or getattr(
+                user_with_role, "is_staff", False
+            ):
+                return True
+
+            return False
+        except User.DoesNotExist:
+            logger.warning(f"User {user.id} not found when checking game control")
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking game control permissions: {e}")
+            return room.host == user
+
+    @database_sync_to_async
+    def skip_participant_db(self, participant_id, room):
+        """Set participant as skipped in database"""
+        try:
+            Participant.objects.filter(id=participant_id, room=room).update(
+                card_selection="SKIPPED"
+            )
+        except Exception as e:
+            logger.error(f"Error skipping participant {participant_id}: {e}")
+
+    @database_sync_to_async
+    def create_session_log(self, room, stats, participants_data):
+        """Create a session log entry when cards are revealed"""
+        try:
+            participant_selections = {}
+            for participant in participants_data:
+                if participant.get("card_selection"):
+                    participant_selections[participant["username"]] = participant[
+                        "card_selection"
+                    ]
+
+            session_log = SessionLog.objects.create(
+                room=room,
+                story_point_average=stats["average"],
+                participant_selections=participant_selections,
+            )
+
+            logger.info(f"Created session log {session_log.id} for room {room.code}")
+            return session_log
+
+        except Exception as e:
+            logger.error(f"Error creating session log: {e}")
+            return None
+
+    @database_sync_to_async
+    def get_room_card_values(self, room):
+        """Get the card values for the room's point system"""
+        return POINT_SYSTEM_CARDS.get(
+            room.point_system, POINT_SYSTEM_CARDS[POINT_SYSTEMS.FIBONACCI]
+        )
 
     @database_sync_to_async
     def get_user_role_string(self, user):
@@ -683,6 +696,9 @@ class RoomConsumer(AsyncWebsocketConsumer):
 
         # Update room status
         await self.update_room_status(self.room, STATUS_CHOICES.COMPLETED)
+
+        # Create session log when cards are revealed
+        await self.create_session_log(self.room, stats, participants_data)
 
         # Broadcast revealed cards
         await self.channel_layer.group_send(
@@ -826,4 +842,104 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 "type": "participant_skipped",
                 "participant_id": participant_id,
             },
+        )
+
+    @database_sync_to_async
+    def create_session_log(self, room, stats, participants_data):
+        """Create a session log entry when cards are revealed"""
+        try:
+            # Build participant selections dictionary
+            participant_selections = {}
+            for participant in participants_data:
+                if participant.get("card_selection"):
+                    participant_selections[participant["username"]] = participant[
+                        "card_selection"
+                    ]
+
+            # Create the session log
+            session_log = SessionLog.objects.create(
+                room=room,
+                story_point_average=stats["average"],
+                participant_selections=participant_selections,
+            )
+
+            logger.info(f"Created session log {session_log.id} for room {room.code}")
+            return session_log
+
+        except Exception as e:
+            logger.error(f"Error creating session log: {e}")
+            return None
+
+    @database_sync_to_async
+    def get_room_card_values(self, room):
+        """Get the card values for the room's point system"""
+        return POINT_SYSTEM_CARDS.get(
+            room.point_system, POINT_SYSTEM_CARDS[POINT_SYSTEMS.FIBONACCI]
+        )
+
+    @database_sync_to_async
+    def should_auto_reveal(self, room):
+        """Check if auto-reveal should happen"""
+        try:
+            # Check if auto-reveal is enabled for this room
+            if not room.auto_reveal_cards:
+                return False
+
+            # Get all participants and check if everyone has voted
+            participants = Participant.objects.filter(room=room)
+            total_participants = participants.count()
+
+            # No participants means no auto-reveal
+            if total_participants == 0:
+                return False
+
+            # Count participants who have voted (have a card selection that's not None)
+            voted_participants = participants.filter(
+                card_selection__isnull=False
+            ).count()
+
+            # Auto-reveal if everyone has voted
+            return voted_participants == total_participants
+
+        except Exception as e:
+            logger.error(f"Error checking auto-reveal conditions: {e}")
+            return False
+
+    async def auto_reveal_cards(self):
+        """Automatically reveal cards when all participants have voted"""
+        try:
+            logger.info(f"Auto-revealing cards for room {self.room.code}")
+
+            participants_data = await self.get_participants_with_votes(self.room)
+            stats = await self.calculate_voting_stats(participants_data)
+
+            # Create session log when cards are revealed
+            await self.create_session_log(self.room, stats, participants_data)
+
+            await self.update_room_status(self.room, STATUS_CHOICES.COMPLETED)
+
+            # Broadcast auto-reveal message
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "cards_auto_revealed",
+                    "participants": participants_data,
+                    "statistics": stats,
+                },
+            )
+
+        except Exception as e:
+            logger.error(f"Error during auto-reveal: {e}")
+
+    # Add new WebSocket event handler
+    async def cards_auto_revealed(self, event):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "cards_revealed",
+                    "participants": event["participants"],
+                    "statistics": event["statistics"],
+                    "auto_revealed": True,  # Flag to indicate this was auto-revealed
+                }
+            )
         )

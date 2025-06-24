@@ -1,9 +1,10 @@
-import { apiClient } from "@/lib/axios";
+import apiClient from "@/lib/axios";
 
 // Define interfaces for API responses and request bodies
 export interface Room {
   id: number;
   code: string;
+  project_name: string;
   status: string;
   host: string;
   host_username?: string; // Add this field to match backend
@@ -37,8 +38,8 @@ export const roomsApi = {
   },
 
   // Create a new room
-  create: async () => {
-    const response = await apiClient.post<Room>("/rooms/");
+  create: async (roomData: { project_name: string; point_system: string }) => {
+    const response = await apiClient.post("/rooms/", roomData);
     return response.data;
   },
 

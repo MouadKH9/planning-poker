@@ -24,11 +24,24 @@ class RoomSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Room
-        fields = ["id", "code", "status", "host_username", "participants"]
+        fields = [
+            "id",
+            "code",
+            "project_name",
+            "point_system",
+            "status",
+            "host_username",
+            "participants",
+        ]
         read_only_fields = ["id", "code", "status", "host_username"]
 
 
 class SessionLogSerializer(serializers.ModelSerializer):
+    room_code = serializers.CharField(source="room.code", read_only=True)
+    room_host = serializers.CharField(source="room.host.username", read_only=True)
+    project_name = serializers.CharField(source="room.project_name", read_only=True)
+    point_system = serializers.CharField(source="room.point_system", read_only=True)
+
     class Meta:
         model = SessionLog
         fields = [
@@ -36,14 +49,22 @@ class SessionLogSerializer(serializers.ModelSerializer):
             "timestamp",
             "story_point_average",
             "participant_selections",
+            "project_name",
+            "point_system",
             "room",
+            "room_code",
+            "room_host",
         ]
         read_only_fields = [
             "id",
             "timestamp",
             "story_point_average",
+            "project_name",
+            "point_system",
             "participant_selections",
             "room",
+            "room_code",
+            "room_host",
         ]
 
 

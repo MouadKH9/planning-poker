@@ -66,7 +66,10 @@ import {
   AreaChart,
 } from "recharts";
 import Header from "../WelcomePage/Header";
-
+import { seessionLogsApi } from "@/lib";
+import { sessionLogsApi } from "@/lib/sessionLogsApi";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 interface SessionLog {
   id: number;
   room: number;
@@ -86,6 +89,7 @@ export default function SessionHistoryPage() {
   const [logs, setLogs] = useState<SessionLog[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
     from: subDays(new Date(), 30),
@@ -212,17 +216,40 @@ export default function SessionHistoryPage() {
     },
   };
 
-  // Get unique projects and hosts for filters
-  const projects = Array.from(
-    new Set(mockSessionData.map((session) => session.project))
-  );
-  const hosts = Array.from(
-    new Set(mockSessionData.map((session) => session.roomHost))
-  );
+  const {
+    data: sessionData = mockSessionData, // Default to mock data
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["sessionLogs"],
+    queryFn: async () => {
+      if (!isAuthenticated) return mockSessionData;
+      setLoading(true);
+      try {
+        const response = await seessionLogsApi.getAllSessionLogs();
+        return response;
+      } catch (error) {
+        console.error("Failed to fetch session logs:", error);
+        return mockSessionData; // Return mock data on error
+      } finally {
+        setLoading(false);
+      }
+    },
+    enabled: isAuthenticated, // Only run query when authenticated
+  });
 
-  // Filter and sort data
+  // Get unique projects and hosts for filters - Always call this hook
+  const projects = useMemo(() => {
+    return Array.from(new Set(sessionData.map((session) => session.project)));
+  }, [sessionData]);
+
+  const hosts = useMemo(() => {
+    return Array.from(new Set(sessionData.map((session) => session.roomHost)));
+  }, [sessionData]);
+
+  // Filter and sort data - Always call this hook
   const filteredData = useMemo(() => {
-    const filtered = mockSessionData.filter((session) => {
+    const filtered = sessionData.filter((session) => {
       const withinDateRange = isWithinInterval(session.timestamp, {
         start: dateRange.from,
         end: dateRange.to,
@@ -277,9 +304,17 @@ export default function SessionHistoryPage() {
     });
 
     return filtered;
-  }, [dateRange, selectedProject, selectedHost, sortBy, sortOrder, searchTerm]);
+  }, [
+    sessionData,
+    dateRange,
+    selectedProject,
+    selectedHost,
+    sortBy,
+    sortOrder,
+    searchTerm,
+  ]);
 
-  // Calculate metrics
+  // Calculate metrics - Always call this hook
   const metrics = useMemo(() => {
     if (filteredData.length === 0) {
       return {
@@ -321,81 +356,64 @@ export default function SessionHistoryPage() {
     };
   }, [filteredData]);
 
-  // Prepare chart data
-  const chartData = filteredData
-    .map((session) => ({
-      date: format(session.timestamp, "MMM dd"),
-      average: session.storyPointAverage,
-      duration: session.sessionDuration,
-      votes: session.totalVotes,
-      stories: session.storiesEstimated,
-      project: session.project,
-    }))
-    .reverse();
+  // Prepare chart data - Always call this hook
+  const chartData = useMemo(() => {
+    return filteredData
+      .map((session) => ({
+        date: format(session.timestamp, "MMM dd"),
+        average: session.storyPointAverage,
+        duration: session.sessionDuration,
+        votes: session.totalVotes,
+        stories: session.storiesEstimated,
+        project: session.project,
+      }))
+      .reverse();
+  }, [filteredData]);
 
-  // Project distribution data
-  const projectDistribution = projects.map((project) => ({
-    name: project,
-    value: filteredData.filter((session) => session.project === project).length,
-    fill: `hsl(${(projects.indexOf(project) * 137.5) % 360}, 70%, 50%)`,
-  }));
+  // Project distribution data - Always call this hook
+  const projectDistribution = useMemo(() => {
+    return projects.map((project) => ({
+      name: project,
+      value: filteredData.filter((session) => session.project === project)
+        .length,
+      fill: `hsl(${(projects.indexOf(project) * 137.5) % 360}, 70%, 50%)`,
+    }));
+  }, [projects, filteredData]);
 
-  useEffect(() => {
-    if (!isAuthenticated || !user?.is_admin) return;
-
-    async function fetchLogs() {
-      setLoading(true);
-      // Fetch all rooms where user is host (admin)
-      const roomsRes = await apiClient.get("/rooms/");
-      const adminRooms = roomsRes.data.filter(
-        (room: Room) => room.host_username === user.username
-      );
-      setRooms(adminRooms);
-
-      // Fetch logs for each room
-      const allLogs: SessionLog[] = [];
-      for (const room of adminRooms) {
-        try {
-          const logsRes = await apiClient.get(
-            `/rooms/${room.id}/session-logs/`
-          );
-          logsRes.data.forEach((log: SessionLog) => {
-            allLogs.push({ ...log, room: room.id });
-          });
-        } catch (e) {
-          // ignore errors for rooms with no logs
-        }
-      }
-      setLogs(allLogs);
-      setLoading(false);
-    }
-
-    fetchLogs();
-  }, [isAuthenticated, user]);
-
-  if (!isAuthenticated || !user?.is_admin) {
+  // Show loading state
+  if (isLoading) {
     return (
-      <>
-        <Header />
-        <div className="p-8 text-center text-red-600">
-          You must be an admin to view session history.
-        </div>
-      </>
-    );
-  } else if (loading) {
-    return (
-      <>
-        <Header />
-        <div className="p-8 text-center">
-          <div className="loader">Loading...</div>
-        </div>
-      </>
+      <div className="flex items-center justify-center h-screen">
+        <div className="loader"></div>
+      </div>
     );
   }
 
+  // Show error state
+  if (isError) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p className="text-red-500">Failed to load session logs</p>
+      </div>
+    );
+  }
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await sessionLogsApi.exportAllSessionLogs();
+      toast.success("Session logs exported successfully!");
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast.error("Failed to export session logs. Please try again.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
-      <Header />  
+      <Header />
       {/* Header */}
       <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 py-4">
@@ -409,9 +427,14 @@ export default function SessionHistoryPage() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExport}
+                disabled={isExporting}
+              >
                 <Download className="h-4 w-4 mr-2" />
-                Export
+                {isExporting ? "Exporting..." : "Export"}
               </Button>
             </div>
           </div>
@@ -484,8 +507,8 @@ export default function SessionHistoryPage() {
                   <SelectContent>
                     <SelectItem value="all">All Projects</SelectItem>
                     {projects.map((project) => (
-                      <SelectItem key={project} value={project}>
-                        {project}
+                      <SelectItem key={String(project)} value={String(project)}>
+                        {String(project)}
                       </SelectItem>
                     ))}
                   </SelectContent>

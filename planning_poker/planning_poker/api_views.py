@@ -1,5 +1,7 @@
+import csv
+from django.http import HttpResponse
 from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
@@ -7,7 +9,10 @@ from planning_poker.serializers import RoomSerializer, SessionLogSerializer
 from planning_poker.utils import generate_unique_room_code
 
 from planning_poker.models import Room, Participant, SessionLog
-from planning_poker.fields import STATUS_CHOICES
+from planning_poker.fields import STATUS_CHOICES, POINT_SYSTEMS
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RoomViewSet(viewsets.ModelViewSet):
@@ -28,15 +33,68 @@ class RoomViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """Create a new room (POST /api/rooms/)"""
-        host = request.user  # This would require authentication
+        try:
+            host = request.user
+            project_name = request.data.get("project_name")
+            point_system = request.data.get("point_system", POINT_SYSTEMS.FIBONACCI)
+            auto_reveal_cards = request.data.get("auto_reveal_cards", False)
+            allow_skip = request.data.get("allow_skip", True)
+            enable_timer = request.data.get("enable_timer", False)
+            timer_duration = request.data.get("timer_duration", 60)
 
-        # Generate a unique room code
-        code = generate_unique_room_code()
+            if not project_name:
+                return Response(
+                    {"error": "Project name is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        room = Room.objects.create(host=host, code=code, status=STATUS_CHOICES.PENDING)
+            # Validate point system
+            valid_point_systems = [choice[0] for choice in POINT_SYSTEMS.choices]
+            if point_system not in valid_point_systems:
+                return Response(
+                    {
+                        "error": f"Invalid point system. Valid options: {valid_point_systems}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        serializer = self.get_serializer(room)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+            # Generate a unique room code with retry logic
+            max_attempts = 10
+            for attempt in range(max_attempts):
+                code = generate_unique_room_code()
+
+                if not Room.objects.filter(code=code).exists():
+                    break
+
+                if attempt == max_attempts - 1:
+                    return Response(
+                        {
+                            "error": "Unable to generate unique room code. Please try again."
+                        },
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
+            room = Room.objects.create(
+                host=host,
+                code=code,
+                project_name=project_name,
+                point_system=point_system,
+                auto_reveal_cards=auto_reveal_cards,
+                allow_skip=allow_skip,
+                enable_timer=enable_timer,
+                timer_duration=timer_duration,
+                status=STATUS_CHOICES.PENDING,
+            )
+
+            serializer = self.get_serializer(room)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            logger.error(f"Error creating room: {e}")
+            return Response(
+                {"error": "Failed to create room. Please try again."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     def retrieve(self, request, pk=None, *args, **kwargs):
         """Fetch room details (GET /api/rooms/{id}/)"""
@@ -64,6 +122,7 @@ class RoomViewSet(viewsets.ModelViewSet):
             {
                 "id": room.id,
                 "code": room.code,
+                "project_name": room.project_name,
                 "status": room.status,
                 "host": room.host.username,
                 "participants": [
@@ -206,6 +265,76 @@ class RoomViewSet(viewsets.ModelViewSet):
         serializer = SessionLogSerializer(logs, many=True)
         return Response(serializer.data)
 
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="session-logs/export",
+        permission_classes=[IsAuthenticated],
+    )
+    def export_session_logs(self, request, pk=None):
+        """
+        Export session logs as CSV for a specific room.
+        GET /api/rooms/{id}/session-logs/export/
+        """
+        room = get_object_or_404(Room, id=pk)
+        if room.host != request.user:
+            return Response(
+                {"error": "Only the room creator can export session logs."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        logs = SessionLog.objects.filter(room=room).order_by("-timestamp")
+
+        # Create CSV response
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = (
+            f'attachment; filename="session_logs_{room.code}.csv"'
+        )
+
+        writer = csv.writer(response)
+        writer.writerow(
+            [
+                "Session ID",
+                "Room Code",
+                "Project Name",
+                "Host",
+                "Timestamp",
+                "Story Point Average",
+                "Total Participants",
+                "Participant Selections",
+                "Total Votes",
+            ]
+        )
+
+        for log in logs:
+            participant_count = len(log.participant_selections)
+            total_votes = sum(
+                1
+                for selection in log.participant_selections.values()
+                if selection and selection != "SKIPPED"
+            )
+
+            # Format participant selections as readable string
+            selections_str = "; ".join(
+                [f"{user}: {vote}" for user, vote in log.participant_selections.items()]
+            )
+
+            writer.writerow(
+                [
+                    log.id,
+                    room.code,
+                    room.project_name,
+                    room.host.username,
+                    log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    log.story_point_average,
+                    participant_count,
+                    selections_str,
+                    total_votes,
+                ]
+            )
+
+        return response
+
 
 @api_view(["GET"])
 def get_room_by_code(request, room_code):
@@ -218,6 +347,7 @@ def get_room_by_code(request, room_code):
             {
                 "id": room.id,
                 "code": room.code,
+                "project_name": room.project_name,
                 "status": room.status,
                 "host": room.host.username,
                 "participants": [
@@ -232,3 +362,108 @@ def get_room_by_code(request, room_code):
         )
     except Room.DoesNotExist:
         return Response({"error": "Room not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_all_user_session_logs(request):
+    """
+    Get all session logs for all rooms created by the current user (host).
+    GET /api/session-logs/all/
+    """
+    user = request.user
+    # Get all rooms where the user is the host
+    rooms = Room.objects.filter(host=user)
+    # Get all session logs for those rooms with room information
+    logs = (
+        SessionLog.objects.filter(room__in=rooms)
+        .select_related("room", "room__host")
+        .order_by("-timestamp")
+    )
+    serializer = SessionLogSerializer(logs, many=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def export_all_session_logs(request):
+    """
+    Export all session logs for all rooms created by the current user as CSV.
+    GET /api/session-logs/export/
+    """
+    user = request.user
+    rooms = Room.objects.filter(host=user)
+    logs = (
+        SessionLog.objects.filter(room__in=rooms)
+        .select_related("room", "room__host")
+        .order_by("-timestamp")
+    )
+
+    # Create CSV response
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = (
+        f'attachment; filename="all_session_logs_{user.username}.csv"'
+    )
+
+    writer = csv.writer(response)
+    writer.writerow(
+        [
+            "Session ID",
+            "Room Code",
+            "Project Name",
+            "Host",
+            "Timestamp",
+            "Story Point Average",
+            "Total Participants",
+            "Participant Selections",
+            "Total Votes",
+            "Session Duration (estimated)",
+            "Consensus Reached",
+        ]
+    )
+
+    for log in logs:
+        participant_count = len(log.participant_selections)
+        total_votes = sum(
+            1
+            for selection in log.participant_selections.values()
+            if selection and selection != "SKIPPED"
+        )
+
+        # Format participant selections as readable string
+        selections_str = "; ".join(
+            [f"{user}: {vote}" for user, vote in log.participant_selections.items()]
+        )
+
+        # Calculate consensus (all votes are the same)
+        numeric_votes = []
+        for selection in log.participant_selections.values():
+            if selection and selection != "SKIPPED":
+                try:
+                    if selection.replace(".", "").isdigit():
+                        numeric_votes.append(float(selection))
+                except (ValueError, AttributeError):
+                    continue
+
+        consensus = len(set(numeric_votes)) == 1 if numeric_votes else False
+
+        # Estimate session duration (mock - you might want to track this properly)
+        estimated_duration = participant_count * 5  # 5 minutes per participant estimate
+
+        writer.writerow(
+            [
+                log.id,
+                log.room.code,
+                log.room.project_name,
+                log.room.host.username,
+                log.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                log.story_point_average,
+                participant_count,
+                selections_str,
+                total_votes,
+                estimated_duration,
+                "Yes" if consensus else "No",
+            ]
+        )
+
+    return response

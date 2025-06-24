@@ -5,7 +5,7 @@ import {
   useEffect,
   ReactNode,
 } from "react";
-import { apiClient } from "@/lib/axios";
+import apiClient from "@/lib/axios";
 
 interface User {
   id: number;

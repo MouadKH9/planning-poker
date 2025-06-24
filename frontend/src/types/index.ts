@@ -7,10 +7,13 @@ export interface RoomState {
   room: {
     id: number;
     code: string;
+    project_name: string;
+    point_system: string;
     status: string;
     host_username: string;
   };
   participants: Participant[];
+  card_values: string[];
   is_host: boolean;
   user_role?: "admin" | "participant";
   can_control?: boolean;

@@ -18,21 +18,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 
 // Planning poker card values
-const cardValues = [
-  "0.5",
-  "1",
-  "2",
-  "3",
-  "5",
-  "8",
-  "13",
-  "21",
-  "34",
-  "55",
-  "89",
-  "?",
-  "☕",
-];
+const defaultCardValues = ["1", "2", "3", "5", "8", "13", "21", "?", "☕"];
 
 export default function RoomPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -49,6 +35,7 @@ export default function RoomPage() {
     "participant"
   );
   const [canControl, setCanControl] = useState(false);
+  const [cardValues, setCardValues] = useState<string[]>(defaultCardValues);
 
   const wsRef = useRef<PlanningPokerWebSocket | null>(null);
 
@@ -83,9 +70,9 @@ export default function RoomPage() {
     // Set up event listeners
     ws.on("room_state", (data: RoomState) => {
       console.log("Room state received:", data);
-      console.log("Current user from room state:", data.current_user);
       setRoomData(data.room);
       setParticipants(data.participants);
+      setCardValues(data.card_values || defaultCardValues);
       setIsHost(data.is_host);
       setUserRole(data.user_role || "participant");
       setCanControl(data.can_control || false);
@@ -113,7 +100,13 @@ export default function RoomPage() {
       setParticipants(data.participants);
       setVotingStats(data.statistics);
       setIsRevealed(true);
-      toast.success("Cards revealed!");
+
+      // Check if this was auto-revealed
+      if (data.auto_revealed) {
+        toast.success("Cards auto-revealed - everyone voted!");
+      } else {
+        toast.success("Cards revealed!");
+      }
     });
 
     ws.on("votes_reset", () => {
@@ -293,6 +286,9 @@ export default function RoomPage() {
           <h1 className="text-2xl font-bold">Planning Session</h1>
           <p className="text-zinc-500">
             Room: <span className="font-mono font-bold">{roomData.code}</span>
+            {roomData.project_name && (
+              <span className="ml-2">- {roomData.project_name}</span>
+            )}
             {isHost && <span className="ml-2 text-blue-600">(Host)</span>}
             {userRole === "admin" && (
               <span className="ml-2 text-red-600">(Admin)</span>
