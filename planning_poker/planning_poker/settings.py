@@ -17,8 +17,18 @@ from datetime import timedelta
 from celery.schedules import crontab
 import dj_database_url
 
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+STATIC_URL = "/static/"
+STATIC_ROOT = "/tmp/staticfiles"  # Temporary location for Render
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+
+# Don't require static files collection in development
+if DEBUG:
+    STATICFILES_DIRS = []
+
 
 # Load environment variables from .env file (only in development)
 if os.path.exists(BASE_DIR / ".env"):
@@ -30,7 +40,6 @@ SECRET_KEY = os.getenv(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
     "localhost",
