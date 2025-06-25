@@ -32,10 +32,21 @@ SECRET_KEY = os.getenv(
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 # Get allowed hosts from environment variable
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+
+# Get allowed hosts from environment variable
 allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(",") if host.strip()]
 
-
+# Add Render domain to allowed hosts for production
+if not DEBUG:  # In production
+    ALLOWED_HOSTS.extend(
+        [
+            "planning-poker-bu0r.onrender.com",
+            ".onrender.com",  # Allow all subdomains of onrender.com
+        ]
+    )
 # Application definition
 
 INSTALLED_APPS = [
