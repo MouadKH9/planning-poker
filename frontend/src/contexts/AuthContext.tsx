@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string
   ) => {
     try {
-      const response = await apiClient.post("/auth/register/", {
+      const response = await apiClient.post("/api/auth/register/", {
         username,
         email,
         password,
@@ -119,7 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const refreshToken = localStorage.getItem("refresh_token");
       if (refreshToken) {
-        await apiClient.post("/auth/logout/", { refresh: refreshToken });
+        await apiClient.post("/api/auth/logout/", { refresh: refreshToken });
       }
     } catch (error) {
       console.error("Logout error:", error);

@@ -18,9 +18,7 @@ class ParticipantSerializer(serializers.ModelSerializer):
 
 class RoomSerializer(serializers.ModelSerializer):
     host_username = serializers.CharField(source="host.username", read_only=True)
-    participants = ParticipantSerializer(
-        many=True, read_only=True, source="participant_set"
-    )
+    participant_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Room
@@ -30,10 +28,35 @@ class RoomSerializer(serializers.ModelSerializer):
             "project_name",
             "point_system",
             "status",
+            "host",
             "host_username",
-            "participants",
+            "participant_count",
+            "created_at",
+            "enable_timer",
+            "timer_duration",
+            "is_timer_active",
+            "timer_start_time",
+            "timer_end_time",
+            "last_activity",
+            "auto_closed",
         ]
-        read_only_fields = ["id", "code", "status", "host_username"]
+        read_only_fields = [
+            "id",
+            "created_at",
+            "host_username",
+            "participant_count",
+            "last_activity",
+            "auto_closed",
+        ]
+
+    def validate_code(self, value):
+        """Validate that code is not empty or blank"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Room code cannot be empty or blank")
+        return value.strip()
+
+    def get_participant_count(self, obj):
+        return obj.participant_set.count()
 
 
 class SessionLogSerializer(serializers.ModelSerializer):
@@ -41,6 +64,11 @@ class SessionLogSerializer(serializers.ModelSerializer):
     room_host = serializers.CharField(source="room.host.username", read_only=True)
     project_name = serializers.CharField(source="room.project_name", read_only=True)
     point_system = serializers.CharField(source="room.point_system", read_only=True)
+    created_at = serializers.DateTimeField(source="room.created_at", read_only=True)
+    updated_at = serializers.DateTimeField(source="room.updated_at", read_only=True)
+    last_activity = serializers.DateTimeField(
+        source="room.last_activity", read_only=True
+    )
 
     class Meta:
         model = SessionLog
@@ -54,6 +82,9 @@ class SessionLogSerializer(serializers.ModelSerializer):
             "room",
             "room_code",
             "room_host",
+            "created_at",
+            "updated_at",
+            "last_activity",
         ]
         read_only_fields = [
             "id",
@@ -65,6 +96,9 @@ class SessionLogSerializer(serializers.ModelSerializer):
             "room",
             "room_code",
             "room_host",
+            "created_at",
+            "updated_at",
+            "last_activity",
         ]
 
 

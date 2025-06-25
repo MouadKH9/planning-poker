@@ -7,9 +7,10 @@ from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from planning_poker.serializers import RoomSerializer, SessionLogSerializer
 from planning_poker.utils import generate_unique_room_code
-
-from planning_poker.models import Room, Participant, SessionLog
+from planning_poker.models import Room, Participant, SessionLog, UserRole
 from planning_poker.fields import STATUS_CHOICES, POINT_SYSTEMS
+from django.utils import timezone
+from datetime import timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,71 +29,65 @@ class RoomViewSet(viewsets.ModelViewSet):
         Instantiates and returns the list of permissions that this view requires.
         """
         if self.action == "create":
-            self.permission_classes = [IsAuthenticated]
+            return [IsAuthenticated()]
+        elif self.action == "retrieve":
+            return []  # Allow anonymous access
+        else:
+            return [IsAuthenticated()]
         return super().get_permissions()
 
     def create(self, request, *args, **kwargs):
         """Create a new room (POST /api/rooms/)"""
         try:
-            host = request.user
-            project_name = request.data.get("project_name")
-            point_system = request.data.get("point_system", POINT_SYSTEMS.FIBONACCI)
-            auto_reveal_cards = request.data.get("auto_reveal_cards", False)
-            allow_skip = request.data.get("allow_skip", True)
-            enable_timer = request.data.get("enable_timer", False)
-            timer_duration = request.data.get("timer_duration", 60)
+            data = request.data.copy()
+            data["host"] = request.user.id
 
-            if not project_name:
-                return Response(
-                    {"error": "Project name is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Validate point system
-            valid_point_systems = [choice[0] for choice in POINT_SYSTEMS.choices]
-            if point_system not in valid_point_systems:
-                return Response(
-                    {
-                        "error": f"Invalid point system. Valid options: {valid_point_systems}"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Generate a unique room code with retry logic
-            max_attempts = 10
-            for attempt in range(max_attempts):
+            # Generate unique code with better error handling
+            try:
                 code = generate_unique_room_code()
+                if not code or not code.strip():
+                    raise ValueError("Generated code is empty")
+                data["code"] = code.strip()
+                logger.info(f"Generated room code: {code}")
+            except ValueError as e:
+                logger.error(f"Code generation failed: {e}")
+                return Response(
+                    {"error": "Unable to generate unique room code. Please try again."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
 
-                if not Room.objects.filter(code=code).exists():
-                    break
+            # Set default project name if not provided
+            if not data.get("project_name"):
+                from planning_poker.helpers import generate_random_project_name
 
-                if attempt == max_attempts - 1:
-                    return Response(
-                        {
-                            "error": "Unable to generate unique room code. Please try again."
-                        },
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    )
+                data["project_name"] = generate_random_project_name()
 
-            room = Room.objects.create(
-                host=host,
-                code=code,
-                project_name=project_name,
-                point_system=point_system,
-                auto_reveal_cards=auto_reveal_cards,
-                allow_skip=allow_skip,
-                enable_timer=enable_timer,
-                timer_duration=timer_duration,
-                status=STATUS_CHOICES.PENDING,
-            )
+            # Validate the data before creating
+            serializer = self.get_serializer(data=data)
+            if not serializer.is_valid():
+                logger.error(f"Serializer validation failed: {serializer.errors}")
+                return Response(
+                    {"error": "Invalid room data", "details": serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            serializer = self.get_serializer(room)
+            room = serializer.save()
+            logger.info(f"Successfully created room: {room.code}")
+
+            # Update admin's last room if they are admin
+            try:
+                user_role = UserRole.objects.get(user=request.user)
+                if user_role.role == "admin":
+                    user_role.last_room = room
+                    user_role.save()
+            except UserRole.DoesNotExist:
+                pass
+
             return Response(serializer.data, status=status.HTTP_201_CREATED)
-
         except Exception as e:
             logger.error(f"Error creating room: {e}")
             return Response(
-                {"error": "Failed to create room. Please try again."},
+                {"error": f"Failed to create room: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -101,14 +96,11 @@ class RoomViewSet(viewsets.ModelViewSet):
         # Try to get by code first, then by ID
         room = None
         try:
-            # Try by code first (most common case for room access)
             room = Room.objects.get(code=pk)
         except Room.DoesNotExist:
             try:
-                # Try by ID if it's numeric
-                if pk.isdigit():
-                    room = Room.objects.get(id=int(pk))
-            except Room.DoesNotExist:
+                room = Room.objects.get(id=pk)
+            except (Room.DoesNotExist, ValueError):
                 pass
 
         if not room:
@@ -116,25 +108,146 @@ class RoomViewSet(viewsets.ModelViewSet):
                 {"error": "Room not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        participants = Participant.objects.filter(room=room)
+        # Check if room is inactive and auto-close it
+        inactive_threshold = timezone.now() - timedelta(minutes=30)
+        if room.last_activity < inactive_threshold and not room.auto_closed:
+            room.status = STATUS_CHOICES.COMPLETED
+            room.auto_closed = True
+            room.save()
+            return Response(
+                {"error": "Room has been closed due to inactivity"},
+                status=status.HTTP_410_GONE,
+            )
 
-        return Response(
-            {
-                "id": room.id,
-                "code": room.code,
-                "project_name": room.project_name,
-                "status": room.status,
-                "host": room.host.username,
-                "participants": [
-                    {
-                        "id": p.id,
-                        "username": p.user.username,
-                        "has_selected": p.card_selection is not None,
-                    }
-                    for p in participants
-                ],
-            }
-        )
+        participants = Participant.objects.filter(room=room)
+        serializer = self.get_serializer(room)
+        return Response(serializer.data)
+
+    @action(
+        detail=False, methods=["get", "delete"], permission_classes=[IsAuthenticated]
+    )
+    def admin_last_room(self, request):
+        """Get or clear admin's last active room"""
+        if request.method == "GET":
+            try:
+                user_role = UserRole.objects.get(user=request.user)
+                if user_role.role != "admin" or not user_role.last_room:
+                    return Response(
+                        {"message": "No last room found"},
+                        status=status.HTTP_204_NO_CONTENT,
+                    )
+
+                room = user_role.last_room
+
+                # Check if room is still active and not auto-closed
+                inactive_threshold = timezone.now() - timedelta(minutes=30)
+                if (
+                    room.auto_closed
+                    or room.status == STATUS_CHOICES.COMPLETED
+                    or room.last_activity < inactive_threshold
+                ):
+                    # Clear the last room reference if it's no longer valid
+                    user_role.last_room = None
+                    user_role.save()
+
+                    return Response(
+                        {"message": "Last room is no longer active"},
+                        status=status.HTTP_204_NO_CONTENT,
+                    )
+
+                serializer = self.get_serializer(room)
+                return Response(serializer.data)
+
+            except UserRole.DoesNotExist:
+                return Response(
+                    {"message": "User role not found"}, status=status.HTTP_404_NOT_FOUND
+                )
+            except Exception as e:
+                logger.error(f"Error getting admin last room: {e}")
+                return Response(
+                    {"error": "Internal server error"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+        elif request.method == "DELETE":
+            try:
+                user_role = UserRole.objects.get(user=request.user)
+                if user_role.role != "admin":
+                    return Response(
+                        {"error": "Only admins can clear their last room"},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                # Get the last room before clearing the reference
+                last_room = user_role.last_room
+
+                # Clear the last room reference
+                user_role.last_room = None
+                user_role.save()
+
+                # Close the room if it exists and is still active
+                if last_room and last_room.status != STATUS_CHOICES.COMPLETED:
+                    # Mark room as completed and auto-closed
+                    last_room.status = STATUS_CHOICES.COMPLETED
+                    last_room.auto_closed = True
+                    last_room.save()
+
+                    # Create a session log for the closed room if there were any votes
+                    participants = Participant.objects.filter(room=last_room)
+                    if participants.filter(card_selection__isnull=False).exists():
+                        selections = {}
+                        total = 0
+                        count = 0
+
+                        for participant in participants:
+                            if participant.card_selection:
+                                try:
+                                    card_value = float(participant.card_selection)
+                                    total += card_value
+                                    count += 1
+                                except ValueError:
+                                    # Handle non-numeric cards like "Pass", "?", etc.
+                                    pass
+                                selections[participant.user.username] = (
+                                    participant.card_selection
+                                )
+
+                        # Calculate average if there are numeric selections
+                        average = total / count if count > 0 else 0
+
+                        # Create session log for the closed session
+                        SessionLog.objects.create(
+                            room=last_room,
+                            story_point_average=average,
+                            participant_selections=selections,
+                        )
+
+                    logger.info(f"Admin closed room {last_room.code} without rejoining")
+
+                    return Response(
+                        {
+                            "message": "Room closed and last room reference cleared successfully",
+                            "room_code": last_room.code,
+                            "room_status": "closed",
+                        },
+                        status=status.HTTP_200_OK,
+                    )
+                else:
+                    return Response(
+                        {"message": "Last room reference cleared successfully"},
+                        status=status.HTTP_200_OK,
+                    )
+
+            except UserRole.DoesNotExist:
+                return Response(
+                    {"message": "User role not found"}, status=status.HTTP_404_NOT_FOUND
+                )
+            except Exception as e:
+                logger.error(f"Error clearing admin last room: {e}")
+                return Response(
+                    {"error": "Internal server error"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
 
     @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
@@ -338,11 +451,24 @@ class RoomViewSet(viewsets.ModelViewSet):
 
 @api_view(["GET"])
 def get_room_by_code(request, room_code):
-    """Get room by code (GET /api/rooms/code/{code}/)"""
+    """Get room by code (GET /api/rooms/code/{code}/) - No auth required for room lookup"""
     try:
         room = Room.objects.get(code=room_code)
-        participants = Participant.objects.filter(room=room)
+        # Return basic room info without sensitive participant details for unauthenticated users
+        if not request.user.is_authenticated:
+            return Response(
+                {
+                    "id": room.id,
+                    "code": room.code,
+                    "project_name": room.project_name,
+                    "status": room.status,
+                    "host": room.host.username,
+                    "participant_count": Participant.objects.filter(room=room).count(),
+                }
+            )
 
+        # For authenticated users, return full details
+        participants = Participant.objects.filter(room=room)
         return Response(
             {
                 "id": room.id,

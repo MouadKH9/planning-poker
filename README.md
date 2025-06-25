@@ -16,6 +16,9 @@ A real-time collaborative estimation tool for agile teams built with Django Chan
 - **Host Controls** - Start rounds, reveal cards, skip participants
 - **Voting Statistics** - Average, consensus detection, and result analysis
 - **Session History** - Complete logs of all estimation rounds
+- **Timer Functionality** - Optional countdown timers for voting rounds
+- **Auto-close Rooms** - Automatically close inactive rooms after 30 minutes
+- **Admin Session Management** - Admins can rejoin their last active room or close sessions
 
 ### 🔧 Technical Features
 - **WebSocket Communication** - Real-time updates across all participants
@@ -23,6 +26,7 @@ A real-time collaborative estimation tool for agile teams built with Django Chan
 - **Guest Mode** - Join sessions without account creation
 - **Room Management** - Unique 6-character room codes for easy sharing
 - **Auto-reconnection** - Handles network interruptions gracefully
+- **Smart Session Recovery** - Admin users get prompted to rejoin active sessions
 
 ### 🎨 User Experience
 - **Intuitive Interface** - Clean, modern design with smooth animations
@@ -30,6 +34,7 @@ A real-time collaborative estimation tool for agile teams built with Django Chan
 - **Toast Notifications** - Non-intrusive feedback for all actions
 - **Card Selection** - Smooth card selection experience with Fibonacci sequence
 - **Room Chat** - Built-in communication during sessions
+- **Smart Dialogs** - Contextual dialogs for better user experience
 
 ## 🛠️ Tech Stack
 
@@ -163,24 +168,35 @@ planning-poker/
 ### Creating a Room
 1. Visit the application homepage
 2. Click "Create New Room" (requires authentication)
-3. Share the generated room code with your team
+3. Configure room settings (timer, auto-reveal, point system)
+4. Share the generated room code with your team
+5. If you're an admin, you'll be prompted to rejoin if you have an active session
 
 ### Joining a Room
 1. Enter the room code on the homepage
 2. Click "Join Room"
 3. Start participating in the estimation session
+4. Both authenticated users and guests can participate
+
+### Admin Features
+- **Session Recovery**: Admins are prompted to rejoin their last active room
+- **Session Management**: Can choose to close sessions when not needed
+- **Enhanced Controls**: Additional permissions for managing room flow
+- **Timer Controls**: Start, pause, and stop voting timers
 
 ### Host Controls
 - **Start Round**: Begin a new estimation round
 - **Reveal Cards**: Show all participant votes
 - **Reset Votes**: Clear all votes for a new round
 - **Skip Participant**: Mark inactive participants as skipped
+- **Timer Management**: Control voting time limits (if enabled)
 
 ### Voting Process
 1. Select a card value from the available options
-2. Wait for all participants to vote
+2. Wait for all participants to vote (or timer to expire)
 3. Host reveals cards to see results
 4. View statistics and discuss estimates
+5. Start new rounds as needed
 
 ### Troubleshooting
 

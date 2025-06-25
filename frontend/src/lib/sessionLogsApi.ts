@@ -11,16 +11,24 @@ export const sessionLogsApi = {
       roomHost: log.room_host,
       storyPointAverage: log.story_point_average,
       participantSelections: log.participant_selections,
-      timestamp: new Date(log.timestamp),
-      sessionDuration: 30, // Default since we don't track duration yet
-      storiesEstimated: 1, // Each log represents one story estimation
+      // If log.created_at is a Django datetime string, store as Date object
+      timestamp: new Date(log.created_at),
+      // sessionDuration in milliseconds
+      sessionDuration:
+        new Date(log.last_activity ?? log.created_at).getTime() -
+        new Date(log.created_at).getTime(),
+      storiesEstimated: response.data.filter(
+        (s: any) => s.room_code === log.room_code
+      ).length,
       totalVotes: Object.keys(log.participant_selections).length,
       participantCount: Object.keys(log.participant_selections).length,
       project: log.project_name || "Unknown Project",
+      // If you want the raw timestamp in milliseconds:
+      createdAtMs: new Date(log.created_at).getTime(),
     }));
 
     return transformedData;
-  },    
+  },
 
   exportAllSessionLogs: async () => {
     const response = await apiClient.get("/session-logs/export/", {

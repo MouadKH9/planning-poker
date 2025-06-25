@@ -32,10 +32,21 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(Room)
 class RoomAdmin(admin.ModelAdmin):
-    list_display = ["id", "code", "host", "status", "participant_count", "has_logs"]
-    list_filter = ["status"]
+    list_display = [
+        "id",
+        "code",
+        "host",
+        "status",
+        "participant_count",
+        "has_logs",
+        "enable_timer",
+        "is_timer_active",
+        "auto_closed",
+        "last_activity",
+    ]
+    list_filter = ["status", "enable_timer", "is_timer_active", "auto_closed"]
     search_fields = ["code", "host__username"]
-    readonly_fields = ["code"]
+    readonly_fields = ["code", "last_activity"]
     inlines = [ParticipantInline, SessionLogInline]
 
     def participant_count(self, obj):
@@ -89,7 +100,7 @@ class SessionLogAdmin(admin.ModelAdmin):
 
 @admin.register(UserRole)
 class UserRoleAdmin(admin.ModelAdmin):
-    list_display = ["user", "role", "user_email", "user_last_login"]
+    list_display = ["user", "role", "user_email", "user_last_login", "last_room"]
     list_filter = ["role"]
     search_fields = ["user__username", "user__email"]
     readonly_fields = ["user_email", "user_last_login", "user_date_joined"]

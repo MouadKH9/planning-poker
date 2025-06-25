@@ -15,14 +15,20 @@ interface RoomHeaderProps {
   roomId: string;
   participants: Participant[];
   isHost?: boolean;
-  onSkipParticipant?: (participantId: number) => void; // Fixed: Added parameter
+  isAdmin?: boolean;
+  canControl?: boolean;
+  isAnonymous?: boolean;
+  onSkipParticipant?: (participantId: number) => void;
 }
 
 export function RoomHeader({
   roomId,
   participants,
   isHost,
-  onSkipParticipant, // Renamed for clarity
+  isAdmin,
+  canControl,
+  isAnonymous,
+  onSkipParticipant,
 }: RoomHeaderProps) {
   const navigate = useNavigate();
 
@@ -93,13 +99,20 @@ export function RoomHeader({
                 </TooltipTrigger>
                 <TooltipContent>
                   <div className="flex flex-col items-center gap-1">
-                    <p>{participant.username}</p>
+                    <p>
+                      {participant.is_anonymous
+                        ? `🎭 ${participant.username}`
+                        : participant.username}
+                    </p>
                     {participant.has_voted ? (
                       <span className="text-green-600 text-xs">✓ Voted</span>
                     ) : (
                       <span className="text-orange-600 text-xs">
                         ⏳ Waiting
                       </span>
+                    )}
+                    {participant.is_anonymous && (
+                      <span className="text-purple-600 text-xs">👤 Guest</span>
                     )}
                     {isHost && onSkipParticipant && !participant.has_voted && (
                       <Button

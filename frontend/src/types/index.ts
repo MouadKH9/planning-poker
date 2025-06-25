@@ -11,12 +11,28 @@ export interface RoomState {
     point_system: string;
     status: string;
     host_username: string;
+    enable_timer?: boolean;
+    timer_duration?: number;
   };
   participants: Participant[];
   card_values: string[];
+  timer_state?: TimerState | null;
   is_host: boolean;
   user_role?: "admin" | "participant";
   can_control?: boolean;
+  is_anonymous?: boolean;
+  current_user?: {
+    id: number | null;
+    username: string;
+    is_anonymous?: boolean;
+  };
+}
+
+export interface TimerState {
+  is_active: boolean;
+  start_time: string | null;
+  end_time: string | null;
+  duration: number;
 }
 
 export interface Participant {
@@ -26,6 +42,7 @@ export interface Participant {
   card_selection: string | null;
   has_voted: boolean;
   vote: number | null;
+  is_anonymous?: boolean;
 }
 
 export interface User {
@@ -70,15 +87,13 @@ export class PlanningPokerWebSocket {
 
     return new Promise((resolve, reject) => {
       const token = localStorage.getItem("access_token");
-
-      if (!token) {
-        this.isConnecting = false;
-        reject(new Error("No authentication token found"));
-        return;
-      }
-
       const wsBaseUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
-      const wsUrl = `${wsBaseUrl}/ws/rooms/${this.roomId}/?token=${token}`;
+
+      // Build WebSocket URL - include token if available, otherwise connect anonymously
+      let wsUrl = `${wsBaseUrl}/ws/rooms/${this.roomId}/`;
+      if (token) {
+        wsUrl += `?token=${token}`;
+      }
 
       console.log("Connecting to WebSocket:", wsUrl);
 
@@ -99,16 +114,22 @@ export class PlanningPokerWebSocket {
           return;
         }
 
-        if (event.code === 4401) {
+        if (event.code === 4404) {
           this.emit("connection_failed", {
-            reason: "Authentication failed. Please log in again.",
+            reason: "Room not found.",
           });
           return;
         }
 
-        if (event.code === 4404) {
+        // For anonymous users, don't treat auth failures as hard errors
+        if (event.code === 4401 && !token) {
+          console.log("Anonymous connection - auth not required");
+          return;
+        }
+
+        if (event.code === 4401 && token) {
           this.emit("connection_failed", {
-            reason: "Room not found.",
+            reason: "Authentication failed. Please log in again.",
           });
           return;
         }
@@ -252,6 +273,25 @@ export class PlanningPokerWebSocket {
     this.send({
       type: "join_room",
       username: username,
+    });
+  }
+
+  startTimer(duration?: number) {
+    this.send({
+      type: "start_timer",
+      duration: duration,
+    });
+  }
+
+  stopTimer() {
+    this.send({
+      type: "stop_timer",
+    });
+  }
+
+  pauseTimer() {
+    this.send({
+      type: "pause_timer",
     });
   }
 

@@ -19,7 +19,7 @@ export default function Header() {
 
   const handleLogout = () => {
     logout();
-    navigate("/");
+    // Stay on current page after logout
   };
 
   const handleSessionHistory = () => {

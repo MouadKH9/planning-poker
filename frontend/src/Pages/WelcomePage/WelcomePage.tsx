@@ -46,6 +46,16 @@ import Header from "./Header";
 import { useAuth } from "@/contexts/AuthContext";
 import { roomsApi } from "@/lib/api";
 import { randomRoomNameGernetor } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface RecentRoom {
   id: string;
@@ -77,9 +87,18 @@ export default function WelcomePage() {
     timerEnabled: false,
     timerDuration: 5,
   });
+  const [showRejoinDialog, setShowRejoinDialog] = useState(false);
+  const [lastRoomData, setLastRoomData] = useState<any>(null);
 
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
+
+  // Check for admin's last room on component mount
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      checkAdminLastRoom();
+    }
+  }, [isAuthenticated, user]);
 
   // Mock recent rooms data - replace with actual API call
   useEffect(() => {
@@ -104,6 +123,46 @@ export default function WelcomePage() {
     }
   }, [isAuthenticated]);
 
+  const checkAdminLastRoom = async () => {
+    try {
+      const lastRoom = await roomsApi.getAdminLastRoom();
+      if (lastRoom && lastRoom.code) {
+        setLastRoomData(lastRoom);
+        setShowRejoinDialog(true);
+      }
+    } catch (error) {
+      // No last room or room no longer active
+      console.log("No active last room found");
+    }
+  };
+
+  const handleRejoinRoom = () => {
+    if (lastRoomData?.code) {
+      navigate(`/room/${lastRoomData.code}`);
+    }
+    setShowRejoinDialog(false);
+    setLastRoomData(null);
+  };
+
+  const handleDeclineRejoin = async () => {
+    try {
+      // Close the session and clear the admin's last room on the backend
+      await roomsApi.clearAdminLastRoom();
+      toast.success("Session closed successfully", {
+        description:
+          "The room has been closed and you can now create a new session",
+      });
+    } catch (error) {
+      console.error("Failed to close session:", error);
+      toast.error("Failed to close session", {
+        description:
+          "There was an error closing the session. Please try again.",
+      });
+    }
+    setShowRejoinDialog(false);
+    setLastRoomData(null);
+  };
+
   const handleJoinRoom = async (code?: string) => {
     const targetCode = code || roomCode.trim();
 
@@ -114,13 +173,23 @@ export default function WelcomePage() {
 
     setIsLoading(true);
     try {
+      // Try to get room info without requiring authentication
       await roomsApi.getById(targetCode);
+      // If successful, navigate to the room (WebSocket will handle auth/anonymous)
       navigate(`/room/${targetCode}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to join room:", error);
-      toast.error("Failed to join room", {
-        description: "Room not found or network error",
-      });
+
+      // Check if it's a 404 (room not found) vs other errors
+      if (error.response?.status === 404) {
+        toast.error("Room not found", {
+          description: "Please check the room code and try again",
+        });
+      } else {
+        // For other errors, still try to join - maybe it's just an API issue
+        console.warn("API check failed, but trying to join anyway:", error);
+        navigate(`/room/${targetCode}`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -183,6 +252,56 @@ export default function WelcomePage() {
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
       <Header />
+
+      {/* Rejoin Room Dialog */}
+      <AlertDialog open={showRejoinDialog} onOpenChange={setShowRejoinDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5 text-blue-600" />
+              Active Room Found
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              You have an active planning session that you can rejoin:
+              <div className="mt-3 p-3 bg-blue-50 rounded-lg border">
+                <div className="font-medium text-blue-900">
+                  {lastRoomData?.project_name}
+                </div>
+                <div className="text-sm text-blue-700 mt-1">
+                  Room Code:{" "}
+                  <span className="font-mono font-bold">
+                    {lastRoomData?.code}
+                  </span>
+                </div>
+                <div className="text-xs text-blue-600 mt-1">
+                  Last activity:{" "}
+                  {lastRoomData?.last_activity
+                    ? new Date(lastRoomData.last_activity).toLocaleString()
+                    : "Recently"}
+                </div>
+              </div>
+              <div className="mt-3 text-sm text-slate-600">
+                Would you like to rejoin this session or close it and start
+                fresh?
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={handleDeclineRejoin}
+              className="text-red-600 hover:text-red-700"
+            >
+              Close Session
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleRejoinRoom}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Rejoin Room
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Hero Section */}
       <section className="flex-1 flex flex-col items-center justify-center px-4 py-12">

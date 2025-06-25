@@ -66,7 +66,6 @@ import {
   AreaChart,
 } from "recharts";
 import Header from "../WelcomePage/Header";
-import { seessionLogsApi } from "@/lib";
 import { sessionLogsApi } from "@/lib/sessionLogsApi";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -217,25 +216,22 @@ export default function SessionHistoryPage() {
   };
 
   const {
-    data: sessionData = mockSessionData, // Default to mock data
+    data: sessionData = mockSessionData,
     isLoading,
     isError,
   } = useQuery({
     queryKey: ["sessionLogs"],
     queryFn: async () => {
       if (!isAuthenticated) return mockSessionData;
-      setLoading(true);
       try {
-        const response = await seessionLogsApi.getAllSessionLogs();
+        const response = await sessionLogsApi.getAllSessionLogs();
         return response;
       } catch (error) {
         console.error("Failed to fetch session logs:", error);
-        return mockSessionData; // Return mock data on error
-      } finally {
-        setLoading(false);
+        return mockSessionData;
       }
     },
-    enabled: isAuthenticated, // Only run query when authenticated
+    enabled: isAuthenticated,
   });
 
   // Get unique projects and hosts for filters - Always call this hook
@@ -269,37 +265,37 @@ export default function SessionHistoryPage() {
 
     // Sort data
     filtered.sort((a, b) => {
-      let aValue, bValue;
+      let aValue: number, bValue: number;
       switch (sortBy) {
-        case "timestamp":
-          aValue = a.timestamp.getTime();
-          bValue = b.timestamp.getTime();
-          break;
-        case "storyPointAverage":
-          aValue = a.storyPointAverage;
-          bValue = b.storyPointAverage;
-          break;
-        case "sessionDuration":
-          aValue = a.sessionDuration;
-          bValue = b.sessionDuration;
-          break;
-        case "storiesEstimated":
-          aValue = a.storiesEstimated;
-          bValue = b.storiesEstimated;
-          break;
-        case "totalVotes":
-          aValue = a.totalVotes;
-          bValue = b.totalVotes;
-          break;
-        default:
-          aValue = a.timestamp.getTime();
-          bValue = b.timestamp.getTime();
+      case "timestamp":
+        aValue = a?.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+        bValue = b?.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+        break;
+      case "storyPointAverage":
+        aValue = a.storyPointAverage;
+        bValue = b.storyPointAverage;
+        break;
+      case "sessionDuration":
+        aValue = a.sessionDuration;
+        bValue = b.sessionDuration;
+        break;
+      case "storiesEstimated":
+        aValue = a.storiesEstimated;
+        bValue = b.storiesEstimated;
+        break;
+      case "totalVotes":
+        aValue = a?.totalVotes;
+        bValue = b?.totalVotes;
+        break;
+      default:
+        aValue = a?.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+        bValue = b?.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
       }
 
       if (sortOrder === "asc") {
-        return aValue > bValue ? 1 : -1;
+      return aValue > bValue ? 1 : -1;
       } else {
-        return aValue < bValue ? 1 : -1;
+      return aValue < bValue ? 1 : -1;
       }
     });
 
