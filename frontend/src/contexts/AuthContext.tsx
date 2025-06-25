@@ -95,13 +95,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = async (
     username: string,
     email: string,
-    password: string
+    password: string,
+    password2?: string
   ) => {
     try {
-      const response = await apiClient.post("/api/auth/register/", {
+      const response = await apiClient.post("/auth/register/", {
         username,
         email,
         password,
+        password2,
       });
 
       const { access, refresh, user: userData } = response.data;
@@ -119,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const refreshToken = localStorage.getItem("refresh_token");
       if (refreshToken) {
-        await apiClient.post("/api/auth/logout/", { refresh: refreshToken });
+        await apiClient.post("/auth/logout/", { refresh: refreshToken });
       }
     } catch (error) {
       console.error("Logout error:", error);
