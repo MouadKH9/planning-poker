@@ -32,16 +32,22 @@ SECRET_KEY = os.getenv(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-# Get allowed hosts from environment variable
-allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
-ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(",") if host.strip()]
+ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "planning-poker-bu0r.onrender.com",
+    ".onrender.com",
+]
 
-# Add Render domain to allowed hosts for production
-if not DEBUG:  # In production
-    ALLOWED_HOSTS.extend([
-        "planning-poker-bu0r.onrender.com",
-        ".onrender.com",
-    ])
+# Add any additional hosts from environment variable
+additional_hosts = os.getenv("ALLOWED_HOSTS", "")
+if additional_hosts:
+    ALLOWED_HOSTS.extend(
+        [host.strip() for host in additional_hosts.split(",") if host.strip()]
+    )
+
+# Remove duplicates
+ALLOWED_HOSTS = list(set(ALLOWED_HOSTS))
 
 # Application definition
 INSTALLED_APPS = [
@@ -96,9 +102,7 @@ ASGI_APPLICATION = "planning_poker.asgi.application"
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 if "DATABASE_URL" in os.environ:
-    DATABASES = {
-        "default": dj_database_url.parse(os.environ["DATABASE_URL"])
-    }
+    DATABASES = {"default": dj_database_url.parse(os.environ["DATABASE_URL"])}
 else:
     # Your existing database configuration
     DATABASES = {
@@ -180,10 +184,12 @@ CORS_ALLOWED_ORIGINS = [
 
 # Add production frontend URLs if available
 if not DEBUG:
-    CORS_ALLOWED_ORIGINS.extend([
-        # Add your deployed frontend URL here when you deploy it
-        # "https://your-frontend-domain.com",
-    ])
+    CORS_ALLOWED_ORIGINS.extend(
+        [
+            # Add your deployed frontend URL here when you deploy it
+            # "https://your-frontend-domain.com",
+        ]
+    )
 
 CORS_ALLOW_CREDENTIALS = True
 
