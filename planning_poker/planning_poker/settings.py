@@ -20,8 +20,9 @@ import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env file
-load_dotenv(BASE_DIR / ".env")
+# Load environment variables from .env file (only in development)
+if os.path.exists(BASE_DIR / ".env"):
+    load_dotenv(BASE_DIR / ".env")
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv(
@@ -32,23 +33,17 @@ SECRET_KEY = os.getenv(
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 # Get allowed hosts from environment variable
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-
-# Get allowed hosts from environment variable
 allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1")
 ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(",") if host.strip()]
 
 # Add Render domain to allowed hosts for production
 if not DEBUG:  # In production
-    ALLOWED_HOSTS.extend(
-        [
-            "planning-poker-bu0r.onrender.com",
-            ".onrender.com",  # Allow all subdomains of onrender.com
-        ]
-    )
-# Application definition
+    ALLOWED_HOSTS.extend([
+        "planning-poker-bu0r.onrender.com",
+        ".onrender.com",
+    ])
 
+# Application definition
 INSTALLED_APPS = [
     "daphne",
     "django.contrib.admin",
@@ -72,7 +67,6 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    # "planning_poker.middleware.AutoAuthMiddleware",  # Commented out for proper auth testing
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -96,13 +90,15 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "planning_poker.wsgi.application"
-
+ASGI_APPLICATION = "planning_poker.asgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 if "DATABASE_URL" in os.environ:
-    DATABASES["default"] = dj_database_url.parse(os.environ["DATABASE_URL"])
+    DATABASES = {
+        "default": dj_database_url.parse(os.environ["DATABASE_URL"])
+    }
 else:
     # Your existing database configuration
     DATABASES = {
@@ -115,7 +111,6 @@ else:
             "PORT": os.getenv("DB_PORT", "5432"),
         }
     }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
@@ -135,18 +130,13 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/5.1/topics/i18n/
 
 LANGUAGE_CODE = "en-us"
-
 TIME_ZONE = "UTC"
-
 USE_I18N = True
-
 USE_TZ = True
-
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
@@ -158,7 +148,7 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-ASGI_APPLICATION = "planning_poker.asgi.application"
+# Channels Configuration
 if "REDIS_URL" in os.environ:
     CHANNEL_LAYERS = {
         "default": {
@@ -183,11 +173,18 @@ SIMPLE_JWT = {
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://localhost:5174",  # Add your frontend development server
+    "http://localhost:5174",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
 ]
-CORS_ALLOW_CREDENTIALS = True
+
+# Add production frontend URLs if available
+if not DEBUG:
+    CORS_ALLOWED_ORIGINS.extend([
+        # Add your deployed frontend URL here when you deploy it
+        # "https://your-frontend-domain.com",
+    ])
+
 CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
@@ -201,8 +198,8 @@ REST_FRAMEWORK = {
 }
 
 # Celery Configuration
-CELERY_BROKER_URL = "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
@@ -212,10 +209,10 @@ CELERY_TIMEZONE = "UTC"
 CELERY_BEAT_SCHEDULE = {
     "check-inactive-rooms": {
         "task": "planning_poker.tasks.check_inactive_rooms",
-        "schedule": crontab(minute="*/5"),  # Run every 5 minutes
+        "schedule": crontab(minute="*/5"),
     },
     "check-expired-timers": {
         "task": "planning_poker.tasks.check_expired_timers",
-        "schedule": 30.0,  # Run every 30 seconds
+        "schedule": 30.0,
     },
 }
