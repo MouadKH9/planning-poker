@@ -121,6 +121,7 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 logger.warning(f"Error leaving channel group: {e}")
 
     async def receive(self, text_data):
+
         try:
             data = json.loads(text_data)
             message_type = data.get("type")

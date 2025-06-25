@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import { roomsApi } from "@/lib/api";
 import Header from "@/Pages/WelcomePage/Header";
 import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";

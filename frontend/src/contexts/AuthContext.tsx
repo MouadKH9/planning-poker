@@ -21,7 +21,8 @@ interface AuthContextType {
   register: (
     username: string,
     email: string,
-    password: string
+    password: string,
+    password2?: string
   ) => Promise<void>;
   logout: () => void;
 }

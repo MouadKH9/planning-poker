@@ -64,7 +64,7 @@ export interface VotingStats {
 export class PlanningPokerWebSocket {
   private ws: WebSocket | null = null;
   private roomId: string;
-  private user: any;
+
   private listeners: Map<string, ((data: any) => void)[]> = new Map();
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
@@ -72,9 +72,8 @@ export class PlanningPokerWebSocket {
   private isConnecting = false;
   private isManuallyDisconnected = false;
 
-  constructor(roomId: string, user?: any) {
+  constructor(roomId: string) {
     this.roomId = roomId;
-    this.user = user;
   }
 
   connect(): Promise<void> {

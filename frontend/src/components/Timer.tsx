@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +29,7 @@ export function Timer({
     let interval: NodeJS.Timeout;
 
     if (timerState) {
-      if ((timerState.is_active && !isPaused) && timerState.end_time) {
+      if (timerState.is_active && !isPaused && timerState.end_time) {
         // Timer is running - calculate from end time
         interval = setInterval(() => {
           const now = new Date().getTime();
@@ -122,12 +122,12 @@ export function Timer({
 
   const displayTime = () => {
     if (!timerState) return "--:--";
-    
+
     const status = getTimerStatus();
     if (status === "paused") {
       return formatTime(pausedTimeRemaining);
     }
-    
+
     return formatTime(timeRemaining);
   };
 
@@ -156,10 +156,15 @@ export function Timer({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="text-center">
-          <div className={`text-3xl font-mono font-bold ${
-            isExpired ? 'text-red-600 animate-pulse' : 
-            getTimerStatus() === "paused" ? 'text-yellow-600' : 'text-gray-900'
-          }`}>
+          <div
+            className={`text-3xl font-mono font-bold ${
+              isExpired
+                ? "text-red-600 animate-pulse"
+                : getTimerStatus() === "paused"
+                ? "text-yellow-600"
+                : "text-gray-900"
+            }`}
+          >
             {displayTime()}
           </div>
           <Badge className={`mt-2 ${getStatusColor()}`}>
@@ -171,7 +176,11 @@ export function Timer({
           <div className="flex gap-2 justify-center">
             {getTimerStatus() !== "running" ? (
               <Button
-                onClick={() => getTimerStatus() === "paused" ? handleResume() : onStartTimer()}
+                onClick={() =>
+                  getTimerStatus() === "paused"
+                    ? handleResume()
+                    : onStartTimer()
+                }
                 size="sm"
                 className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
               >
@@ -222,9 +231,11 @@ export function Timer({
         )}
 
         {/* Debug info - remove in production */}
-        {process.env.NODE_ENV === 'development' && (
+        {process.env.NODE_ENV === "development" && (
           <div className="text-xs text-gray-400 text-center">
-            Status: {getTimerStatus()} | Active: {timerState?.is_active ? 'Yes' : 'No'} | Paused: {isPaused ? 'Yes' : 'No'}
+            Status: {getTimerStatus()} | Active:{" "}
+            {timerState?.is_active ? "Yes" : "No"} | Paused:{" "}
+            {isPaused ? "Yes" : "No"}
           </div>
         )}
       </CardContent>

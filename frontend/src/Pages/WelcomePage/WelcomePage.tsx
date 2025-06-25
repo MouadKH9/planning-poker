@@ -49,10 +49,7 @@ import {
   Activity,
   CheckCircle,
   Loader2,
-  Copy,
   ExternalLink,
-  Play,
-  Pause,
 } from "lucide-react";
 import Header from "./Header";
 import { useAuth } from "@/contexts/AuthContext";
@@ -106,11 +103,9 @@ export default function WelcomePage() {
   const [lastRoomData, setLastRoomData] = useState<any>(null);
   const [titleNumber, setTitleNumber] = useState(0);
   const [joinProgress, setJoinProgress] = useState(0);
-  const [createProgress, setCreateProgress] = useState(0);
   const [validationState, setValidationState] = useState<
     "idle" | "checking" | "valid" | "invalid"
   >("idle");
-  const [animationsPaused, setAnimationsPaused] = useState(false);
 
   const titles = useMemo(
     () => ["Better", "Faster", "Smarter", "Together", "Efficiently"],
@@ -212,7 +207,7 @@ export default function WelcomePage() {
       }
     }, 2000);
     return () => clearTimeout(timeoutId);
-  }, [titleNumber, titles, animationsPaused]);
+  }, [titleNumber, titles]);
 
   // Room code validation
   useEffect(() => {
@@ -367,11 +362,9 @@ export default function WelcomePage() {
     }
 
     setIsLoading(true);
-    setCreateProgress(0);
 
     const progressSteps = [25, 50, 75, 100];
-    for (const progress of progressSteps) {
-      setCreateProgress(progress);
+    for (const _ of progressSteps) {
       await new Promise((resolve) => setTimeout(resolve, 400));
     }
 
@@ -393,7 +386,6 @@ export default function WelcomePage() {
       });
     } finally {
       setIsLoading(false);
-      setCreateProgress(0);
     }
   };
 

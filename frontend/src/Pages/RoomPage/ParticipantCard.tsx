@@ -1,5 +1,4 @@
 import { motion } from "framer-motion";
-import { ParticipantAvatar } from "@/components/ParticipantAvatar";
 import { Participant } from "@/types/index";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -26,7 +25,8 @@ export function ParticipantCard({
         participant.has_voted
           ? "border-green-500/30 bg-green-500/5 dark:border-green-400/30 dark:bg-green-400/5"
           : "border-border bg-card",
-        participant.is_anonymous && "border-dashed border-purple-500/50 dark:border-purple-400/50"
+        participant.is_anonymous &&
+          "border-dashed border-purple-500/50 dark:border-purple-400/50"
       )}
       whileHover={{ y: -5 }}
       transition={{ type: "spring", stiffness: 300 }}
@@ -35,7 +35,8 @@ export function ParticipantCard({
         <span
           className={cn(
             "text-sm font-medium text-foreground",
-            participant.is_anonymous && "text-purple-600 dark:text-purple-400 font-bold"
+            participant.is_anonymous &&
+              "text-purple-600 dark:text-purple-400 font-bold"
           )}
         >
           {participant.is_anonymous

@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiClient } from "@/lib/axios";
+import { useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Card,
@@ -69,25 +68,25 @@ import Header from "../WelcomePage/Header";
 import { sessionLogsApi } from "@/lib/sessionLogsApi";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-interface SessionLog {
-  id: number;
-  room: number;
-  story_point_average: number;
-  participant_selections: Record<string, string>;
-  timestamp: string;
-}
 
-interface Room {
+// Add interface for the mock session data structure
+interface SessionData {
   id: number;
-  code: string;
-  status: string;
+  roomCode: string;
+  roomHost: string;
+  storyPointAverage: number;
+  participantSelections: Record<string, string>;
+  timestamp: Date;
+  sessionDuration: number;
+  storiesEstimated: number;
+  totalVotes: number;
+  participantCount: number;
+  project: string;
 }
 
 export default function SessionHistoryPage() {
-  const { user, isAuthenticated } = useAuth();
-  const [logs, setLogs] = useState<SessionLog[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { isAuthenticated } = useAuth();
+
   const [isExporting, setIsExporting] = useState(false);
 
   const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
@@ -101,7 +100,7 @@ export default function SessionHistoryPage() {
   const [searchTerm, setSearchTerm] = useState<string>("");
 
   //mock data - replace with actual API calls
-  const mockSessionData = [
+  const mockSessionData: SessionData[] = [
     {
       id: 1,
       roomCode: "ABC123",
@@ -236,16 +235,20 @@ export default function SessionHistoryPage() {
 
   // Get unique projects and hosts for filters - Always call this hook
   const projects = useMemo(() => {
-    return Array.from(new Set(sessionData.map((session) => session.project)));
+    return Array.from(
+      new Set(sessionData.map((session: SessionData) => session.project))
+    );
   }, [sessionData]);
 
   const hosts = useMemo(() => {
-    return Array.from(new Set(sessionData.map((session) => session.roomHost)));
+    return Array.from(
+      new Set(sessionData.map((session: SessionData) => session.roomHost))
+    );
   }, [sessionData]);
 
   // Filter and sort data - Always call this hook
   const filteredData = useMemo(() => {
-    const filtered = sessionData.filter((session) => {
+    const filtered = sessionData.filter((session: SessionData) => {
       const withinDateRange = isWithinInterval(session.timestamp, {
         start: dateRange.from,
         end: dateRange.to,
@@ -264,38 +267,50 @@ export default function SessionHistoryPage() {
     });
 
     // Sort data
-    filtered.sort((a, b) => {
+    filtered.sort((a: SessionData, b: SessionData) => {
       let aValue: number, bValue: number;
       switch (sortBy) {
-      case "timestamp":
-        aValue = a?.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
-        bValue = b?.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
-        break;
-      case "storyPointAverage":
-        aValue = a.storyPointAverage;
-        bValue = b.storyPointAverage;
-        break;
-      case "sessionDuration":
-        aValue = a.sessionDuration;
-        bValue = b.sessionDuration;
-        break;
-      case "storiesEstimated":
-        aValue = a.storiesEstimated;
-        bValue = b.storiesEstimated;
-        break;
-      case "totalVotes":
-        aValue = a?.totalVotes;
-        bValue = b?.totalVotes;
-        break;
-      default:
-        aValue = a?.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
-        bValue = b?.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+        case "timestamp":
+          aValue =
+            a?.timestamp instanceof Date
+              ? a.timestamp.getTime()
+              : new Date(a.timestamp).getTime();
+          bValue =
+            b?.timestamp instanceof Date
+              ? b.timestamp.getTime()
+              : new Date(b.timestamp).getTime();
+          break;
+        case "storyPointAverage":
+          aValue = a.storyPointAverage;
+          bValue = b.storyPointAverage;
+          break;
+        case "sessionDuration":
+          aValue = a.sessionDuration;
+          bValue = b.sessionDuration;
+          break;
+        case "storiesEstimated":
+          aValue = a.storiesEstimated;
+          bValue = b.storiesEstimated;
+          break;
+        case "totalVotes":
+          aValue = a?.totalVotes;
+          bValue = b?.totalVotes;
+          break;
+        default:
+          aValue =
+            a?.timestamp instanceof Date
+              ? a.timestamp.getTime()
+              : new Date(a.timestamp).getTime();
+          bValue =
+            b?.timestamp instanceof Date
+              ? b.timestamp.getTime()
+              : new Date(b.timestamp).getTime();
       }
 
       if (sortOrder === "asc") {
-      return aValue > bValue ? 1 : -1;
+        return aValue > bValue ? 1 : -1;
       } else {
-      return aValue < bValue ? 1 : -1;
+        return aValue < bValue ? 1 : -1;
       }
     });
 
@@ -325,19 +340,21 @@ export default function SessionHistoryPage() {
 
     const totalSessions = filteredData.length;
     const avgSessionDuration =
-      filteredData.reduce((sum, session) => sum + session.sessionDuration, 0) /
-      totalSessions;
+      filteredData.reduce(
+        (sum: number, session: SessionData) => sum + session.sessionDuration,
+        0
+      ) / totalSessions;
     const avgStoryPoints =
       filteredData.reduce(
-        (sum, session) => sum + session.storyPointAverage,
+        (sum: number, session: SessionData) => sum + session.storyPointAverage,
         0
       ) / totalSessions;
     const totalStoriesEstimated = filteredData.reduce(
-      (sum, session) => sum + session.storiesEstimated,
+      (sum: number, session: SessionData) => sum + session.storiesEstimated,
       0
     );
     const totalVotes = filteredData.reduce(
-      (sum, session) => sum + session.totalVotes,
+      (sum: number, session: SessionData) => sum + session.totalVotes,
       0
     );
     const avgParticipantEngagement = totalVotes / totalStoriesEstimated || 0;
@@ -355,7 +372,7 @@ export default function SessionHistoryPage() {
   // Prepare chart data - Always call this hook
   const chartData = useMemo(() => {
     return filteredData
-      .map((session) => ({
+      .map((session: SessionData) => ({
         date: format(session.timestamp, "MMM dd"),
         average: session.storyPointAverage,
         duration: session.sessionDuration,
@@ -370,8 +387,9 @@ export default function SessionHistoryPage() {
   const projectDistribution = useMemo(() => {
     return projects.map((project) => ({
       name: project,
-      value: filteredData.filter((session) => session.project === project)
-        .length,
+      value: filteredData.filter(
+        (session: SessionData) => session.project === project
+      ).length,
       fill: `hsl(${(projects.indexOf(project) * 137.5) % 360}, 70%, 50%)`,
     }));
   }, [projects, filteredData]);
@@ -520,8 +538,8 @@ export default function SessionHistoryPage() {
                   <SelectContent>
                     <SelectItem value="all">All Hosts</SelectItem>
                     {hosts.map((host) => (
-                      <SelectItem key={host} value={host}>
-                        {host}
+                      <SelectItem key={String(host)} value={String(host)}>
+                        {String(host)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -652,7 +670,7 @@ export default function SessionHistoryPage() {
                       cy="50%"
                       labelLine={false}
                       label={({ name, percent }) =>
-                        `${name} ${(percent * 100).toFixed(0)}%`
+                        `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
                       }
                       outerRadius={80}
                       fill="#8884d8"
@@ -769,7 +787,7 @@ export default function SessionHistoryPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredData.map((session) => (
+                  {filteredData.map((session: SessionData) => (
                     <TableRow key={session.id}>
                       <TableCell className="font-medium">
                         <Badge variant="outline">{session.roomCode}</Badge>

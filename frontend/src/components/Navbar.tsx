@@ -1,7 +1,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 
 export function Navbar() {
-  const { user, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
 
   return (
     <nav className="bg-white shadow-md">

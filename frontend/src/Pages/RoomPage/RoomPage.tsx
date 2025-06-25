@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { Users, Crown, Shield, Coffee, Clock, BarChart3, Diamond } from "lucide-react";
+import { Users, Crown, Shield, Clock, BarChart3, Diamond } from "lucide-react";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { ParticipantCard } from "./ParticipantCard";
 import { VotingControls } from "./VotingControls";
@@ -43,7 +43,6 @@ export default function RoomPage() {
   const [timerState, setTimerState] = useState<TimerState | null>(null);
 
   const wsRef = useRef<PlanningPokerWebSocket | null>(null);
-  const safeRoomId = roomId || "unknown";
   const { user } = useAuth();
 
   useEffect(() => {
@@ -55,7 +54,7 @@ export default function RoomPage() {
 
     console.log("Initializing WebSocket connection for room:", roomId);
 
-    const ws = new PlanningPokerWebSocket(roomId, user);
+    const ws = new PlanningPokerWebSocket(roomId);
     wsRef.current = ws;
 
     ws.on("room_state", (data: RoomState) => {

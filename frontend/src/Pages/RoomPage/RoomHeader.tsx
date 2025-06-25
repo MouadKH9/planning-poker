@@ -25,9 +25,6 @@ export function RoomHeader({
   roomId,
   participants,
   isHost,
-  isAdmin,
-  canControl,
-  isAnonymous,
   onSkipParticipant,
 }: RoomHeaderProps) {
   const navigate = useNavigate();
