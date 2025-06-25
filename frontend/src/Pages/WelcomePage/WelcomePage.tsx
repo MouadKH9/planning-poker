@@ -916,7 +916,6 @@ export default function WelcomePage() {
                     style={{
                       animationDelay: `${index * 100}ms`,
                     }}
-                    onClick={() => handleJoinRoom(room.code)}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
