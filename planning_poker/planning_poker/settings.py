@@ -180,7 +180,6 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5174",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
-    "https://planning-poker-1-z0ob.onrender.com",
 ]
 
 # Add production frontend URLs if available
@@ -188,7 +187,7 @@ if not DEBUG:
     CORS_ALLOWED_ORIGINS.extend(
         [
             # Add your deployed frontend URL here when you deploy it
-            # "https://your-frontend-domain.com",
+            "https://planning-poker-1-z0ob.onrender.com",
         ]
     )
 
