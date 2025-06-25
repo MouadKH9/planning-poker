@@ -37,7 +37,7 @@ export function VotingControls({
       {/* Admin badge */}
       {isAdmin && (
         <div className="w-full text-center mb-2">
-          <span className="inline-block px-3 py-1 bg-red-100 text-red-800 text-sm font-medium rounded-full">
+          <span className="inline-block px-3 py-1 bg-destructive/10 text-destructive dark:bg-destructive/20 dark:text-red-400 text-sm font-medium rounded-full border border-destructive/20 dark:border-destructive/30">
             🛡️ Admin Controls
           </span>
         </div>
@@ -46,7 +46,7 @@ export function VotingControls({
       {!isRevealed ? (
         <Button
           onClick={onReveal}
-          className="bg-zinc-900 hover:bg-zinc-800 px-8"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground px-8"
           disabled={!selectedCard}
         >
           Reveal Cards
@@ -58,7 +58,7 @@ export function VotingControls({
           </Button>
           <Button
             onClick={onStartRound}
-            className="bg-green-600 hover:bg-green-500 px-8"
+            className="bg-green-600 hover:bg-green-500 dark:bg-green-700 dark:hover:bg-green-600 text-white px-8"
           >
             Start New Round
           </Button>

@@ -7,7 +7,7 @@ interface ConnectionStatusProps {
 export function ConnectionStatus({ isConnected }: ConnectionStatusProps) {
   return (
     <motion.div
-      className={`mb-4 p-3 rounded-lg flex items-center gap-2 ${
+      className={`   p-1 rounded-lg flex items-center gap-2 ${
         isConnected
           ? "bg-green-50 border border-green-200"
           : "bg-red-50 border border-red-200"

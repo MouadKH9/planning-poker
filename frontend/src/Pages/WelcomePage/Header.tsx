@@ -1,9 +1,17 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useAuth } from "@/contexts/AuthContext";
+import { History, User, LogOut, LogIn, UserPlus, Diamond } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { User, History, LogOut, LogIn, UserPlus } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export default function Header() {
   const navigate = useNavigate();
@@ -17,8 +25,8 @@ export default function Header() {
     navigate("/signup");
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     // Stay on current page after logout
   };
 
@@ -26,90 +34,82 @@ export default function Header() {
     navigate("/session-history");
   };
 
-  if (isAuthenticated) {
-    return (
-      <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-        <div className="container flex h-16 items-center justify-between px-4">
-          <a
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-            href="/"
-          >
-            <div className="p-2 bg-blue-600 rounded-lg">
-              <div className="w-6 h-6 bg-white rounded-sm flex items-center justify-center">
-                <span className="text-blue-600 font-bold text-sm">P</span>
-              </div>
-            </div>
-            <div className="font-bold text-xl text-slate-900">
-              PlanningPoker
-            </div>
-          </a>
-
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleSessionHistory}
-              className="text-slate-600 hover:text-slate-900"
-            >
-              <History className="w-4 h-4 mr-2" />
-              History
-            </Button>
-
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-full">
-              <User className="w-4 h-4 text-slate-600" />
-              <span className="text-sm font-medium text-slate-900">
-                {user?.username}
+  return (
+    <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <a className="flex items-center gap-2" href="/">
+          <div className="p-1 bg-primary rounded-md">
+            <div className="w-6 h-8 bg-primary-foreground rounded-sm flex items-center justify-center">
+              <span className="text-primary font-bold text-sm">
+                <Diamond className="w-4 h-8" />
               </span>
             </div>
-
-            <Button
-              onClick={handleLogout}
-              variant="ghost"
-              size="sm"
-              className="text-slate-600 hover:text-slate-900"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </Button>
           </div>
-        </div>
-      </header>
-    );
-  }
-
-  return (
-    <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-      <div className="container flex h-16 items-center justify-between px-4">
-        <a
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-          href="/"
-        >
-          <div className="p-2 bg-blue-600 rounded-lg">
-            <div className="w-6 h-6 bg-white rounded-sm flex items-center justify-center">
-              <span className="text-blue-600 font-bold text-sm">P</span>
-            </div>
-          </div>
-          <div className="font-bold text-xl text-slate-900">PlanningPoker</div>
+          <span className="font-bold text-xl text-foreground">
+            Planning Poker
+          </span>
         </a>
 
         <div className="flex items-center gap-3">
-          <Button
-            onClick={handleLogin}
-            variant="ghost"
-            size="sm"
-            className="text-slate-600 hover:text-slate-900"
-          >
-            <LogIn className="w-4 h-4 mr-2" />
-            Login
-          </Button>
-          <Button
-            onClick={handleSignUp}
-            size="sm"
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <UserPlus className="w-4 h-4 mr-2" />
-            Sign Up
-          </Button>
+          <ThemeToggle />
+
+          {isAuthenticated && user ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleSessionHistory}
+                className="hidden sm:flex items-center gap-2"
+              >
+                <History className="w-4 h-4" />
+                History
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center gap-2"
+                  >
+                    <User className="w-4 h-4" />
+                    <span className="hidden sm:inline">{user.username}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleSessionHistory}>
+                    <History className="w-4 h-4 mr-2" />
+                    Session History
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleLogin}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <LogIn className="w-4 h-4 mr-2" />
+                Login
+              </Button>
+              <Button
+                onClick={handleSignUp}
+                size="sm"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                <UserPlus className="w-4 h-4 mr-2" />
+                Sign Up
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </header>

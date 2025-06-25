@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { motion } from "framer-motion";
 import {
   Card,
   CardContent,
@@ -29,6 +30,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
   Users,
@@ -41,6 +44,15 @@ import {
   Settings,
   History,
   Sparkles,
+  TrendingUp,
+  PuzzleIcon,
+  Activity,
+  CheckCircle,
+  Loader2,
+  Copy,
+  ExternalLink,
+  Play,
+  Pause,
 } from "lucide-react";
 import Header from "./Header";
 import { useAuth } from "@/contexts/AuthContext";
@@ -63,6 +75,9 @@ interface RecentRoom {
   projectName: string;
   lastJoined: string;
   participantCount: number;
+  status: "active" | "voting" | "completed";
+  isNew?: boolean;
+  progress?: number;
 }
 
 interface RoomSettings {
@@ -80,7 +95,7 @@ export default function WelcomePage() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [recentRooms, setRecentRooms] = useState<RecentRoom[]>([]);
   const [roomSettings, setRoomSettings] = useState<RoomSettings>({
-    projectName: randomRoomNameGernetor(), // Call the function immediately
+    projectName: randomRoomNameGernetor(),
     pointSystem: "fibonacci",
     allowObservers: true,
     autoReveal: false,
@@ -89,9 +104,64 @@ export default function WelcomePage() {
   });
   const [showRejoinDialog, setShowRejoinDialog] = useState(false);
   const [lastRoomData, setLastRoomData] = useState<any>(null);
+  const [titleNumber, setTitleNumber] = useState(0);
+  const [joinProgress, setJoinProgress] = useState(0);
+  const [createProgress, setCreateProgress] = useState(0);
+  const [validationState, setValidationState] = useState<
+    "idle" | "checking" | "valid" | "invalid"
+  >("idle");
+  const [animationsPaused, setAnimationsPaused] = useState(false);
 
+  const titles = useMemo(
+    () => ["Better", "Faster", "Smarter", "Together", "Efficiently"],
+    []
+  );
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
+
+  // Generate mock recent rooms data with realistic project names
+  const generateMockRooms = (): RecentRoom[] => {
+    const projectNames = [
+      "User Authentication System",
+      "Payment Gateway Integration",
+      "Mobile App Redesign",
+      "API Performance Optimization",
+      "Shopping Cart Features",
+      "Real-time Chat Implementation",
+      "Data Analytics Dashboard",
+      "Security Audit & Fixes",
+      "Machine Learning Pipeline",
+      "Microservices Migration",
+      "Cloud Infrastructure Setup",
+      "Customer Support Portal",
+      "Inventory Management System",
+      "Social Media Integration",
+      "Email Campaign Builder",
+      "Search Engine Optimization",
+      "Database Schema Updates",
+      "Third-party Integrations",
+      "Bug Fixes & Maintenance",
+      "Performance Monitoring",
+    ];
+
+    const statuses: Array<"active" | "voting" | "completed"> = [
+      "active",
+      "voting",
+      "completed",
+    ];
+
+    return Array.from({ length: 8 }, (_, i) => ({
+      id: `room-${i + 2}`,
+      code: Math.random().toString(36).substring(2, 8).toUpperCase(),
+      projectName:
+        projectNames[Math.floor(Math.random() * projectNames.length)],
+      lastJoined: `${Math.floor(Math.random() * 30) + 1} min ago`,
+      participantCount: Math.floor(Math.random() * 12) + 2,
+      status: statuses[Math.floor(Math.random() * statuses.length)],
+      isNew: Math.random() > 0.7,
+      progress: Math.floor(Math.random() * 100),
+    }));
+  };
 
   // Check for admin's last room on component mount
   useEffect(() => {
@@ -100,28 +170,108 @@ export default function WelcomePage() {
     }
   }, [isAuthenticated, user]);
 
-  // Mock recent rooms data - replace with actual API call
+  // Initialize recent rooms with animation
   useEffect(() => {
     if (isAuthenticated) {
-      // Simulate loading recent rooms
+      // Show your actual recent rooms first (if any)
       setRecentRooms([
         {
-          id: "1",
+          id: "user-1",
           code: "ABC123",
           projectName: "User Authentication",
           lastJoined: "2 hours ago",
           participantCount: 5,
+          status: "completed",
         },
         {
-          id: "2",
+          id: "user-2",
           code: "XYZ789",
           projectName: "Payment Integration",
           lastJoined: "1 day ago",
           participantCount: 3,
+          status: "completed",
         },
       ]);
+
+      // Add animated mock rooms after a delay
+      setTimeout(() => {
+        setRecentRooms((prev) => [...prev, ...generateMockRooms()]);
+      }, 1000);
+    } else {
+      // For non-authenticated users, show animated activity
+      setRecentRooms(generateMockRooms());
     }
   }, [isAuthenticated]);
+  // Animated title effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (titleNumber === titles.length - 1) {
+        setTitleNumber(0);
+      } else {
+        setTitleNumber(titleNumber + 1);
+      }
+    }, 2000);
+    return () => clearTimeout(timeoutId);
+  }, [titleNumber, titles, animationsPaused]);
+
+  // Room code validation
+  useEffect(() => {
+    if (!roomCode.trim()) {
+      setValidationState("idle");
+      return;
+    }
+
+    setValidationState("checking");
+    const timer = setTimeout(() => {
+      const isValid = roomCode.length >= 3;
+      setValidationState(isValid ? "valid" : "invalid");
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [roomCode]);
+
+  // Animate room updates to show activity
+  useEffect(() => {
+    if (recentRooms.length === 0) return;
+
+    const interval = setInterval(() => {
+      setRecentRooms((prev) => {
+        const updated = [...prev];
+
+        // Randomly update a room's participant count or status
+        const randomIndex = Math.floor(Math.random() * updated.length);
+        const room = updated[randomIndex];
+
+        // Occasionally add new rooms or update existing ones
+        if (Math.random() > 0.8) {
+          // Add a new room at the beginning
+          const newRoom = generateMockRooms()[0];
+          newRoom.isNew = true;
+          updated.unshift(newRoom);
+
+          // Remove the last room to keep the list manageable
+          if (updated.length > 10) {
+            updated.pop();
+          }
+        } else if (Math.random() > 0.5) {
+          // Update participant count
+          updated[randomIndex] = {
+            ...room,
+            participantCount: Math.max(
+              1,
+              room.participantCount + (Math.random() > 0.5 ? 1 : -1)
+            ),
+            lastJoined: `${Math.floor(Math.random() * 5) + 1} min ago`,
+          };
+        }
+
+        // Remove "new" flag after animation
+        return updated.map((room) => ({ ...room, isNew: false }));
+      });
+    }, 3000 + Math.random() * 2000); // Random interval between 3-5 seconds
+
+    return () => clearInterval(interval);
+  }, [recentRooms.length]);
 
   const checkAdminLastRoom = async () => {
     try {
@@ -131,7 +281,6 @@ export default function WelcomePage() {
         setShowRejoinDialog(true);
       }
     } catch (error) {
-      // No last room or room no longer active
       console.log("No active last room found");
     }
   };
@@ -146,7 +295,6 @@ export default function WelcomePage() {
 
   const handleDeclineRejoin = async () => {
     try {
-      // Close the session and clear the admin's last room on the backend
       await roomsApi.clearAdminLastRoom();
       toast.success("Session closed successfully", {
         description:
@@ -172,26 +320,29 @@ export default function WelcomePage() {
     }
 
     setIsLoading(true);
+    setJoinProgress(0);
+
+    // Simulate joining process with progress
+    const progressSteps = [20, 50, 80, 100];
+    for (const progress of progressSteps) {
+      setJoinProgress(progress);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
     try {
-      // Try to get room info without requiring authentication
       await roomsApi.getById(targetCode);
-      // If successful, navigate to the room (WebSocket will handle auth/anonymous)
       navigate(`/room/${targetCode}`);
     } catch (error: any) {
-      console.error("Failed to join room:", error);
-
-      // Check if it's a 404 (room not found) vs other errors
       if (error.response?.status === 404) {
         toast.error("Room not found", {
           description: "Please check the room code and try again",
         });
       } else {
-        // For other errors, still try to join - maybe it's just an API issue
-        console.warn("API check failed, but trying to join anyway:", error);
         navigate(`/room/${targetCode}`);
       }
     } finally {
       setIsLoading(false);
+      setJoinProgress(0);
     }
   };
 
@@ -202,7 +353,6 @@ export default function WelcomePage() {
       return;
     }
 
-    // Generate a new random name when opening the dialog
     setRoomSettings((prev) => ({
       ...prev,
       projectName: randomRoomNameGernetor(),
@@ -217,25 +367,72 @@ export default function WelcomePage() {
     }
 
     setIsLoading(true);
+    setCreateProgress(0);
+
+    const progressSteps = [25, 50, 75, 100];
+    for (const progress of progressSteps) {
+      setCreateProgress(progress);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+
     try {
       const newRoom = await roomsApi.create({
         project_name: roomSettings.projectName.trim(),
         point_system: roomSettings.pointSystem,
-        auto_reveal_cards: roomSettings.autoReveal, // Include auto-reveal setting
+        auto_reveal_cards: roomSettings.autoReveal,
         allow_skip: true,
         enable_timer: roomSettings.timerEnabled,
-        timer_duration: roomSettings.timerDuration * 60, // Convert to seconds
+        timer_duration: roomSettings.timerDuration * 60,
       });
       setShowCreateDialog(false);
       setRoomSettings((prev) => ({ ...prev, projectName: "" }));
       navigate(`/room/${newRoom.code}`);
     } catch (error) {
-      console.error("Failed to create room:", error);
       toast.error("Failed to create room", {
         description: "Please try again",
       });
     } finally {
       setIsLoading(false);
+      setCreateProgress(0);
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "active":
+        return <PuzzleIcon className="w-3 h-3 text-green-500 animate-pulse" />;
+      case "voting":
+        return <TrendingUp className="w-3 h-3 text-blue-500" />;
+      case "completed":
+        return <CheckCircle className="w-3 h-3 text-muted-foreground" />;
+      default:
+        return <Clock className="w-3 h-3 text-muted-foreground" />;
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case "active":
+        return "Live";
+      case "voting":
+        return "Voting";
+      case "completed":
+        return "Done";
+      default:
+        return "Idle";
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "active":
+        return "text-green-600 dark:text-green-400 bg-green-500/10 border-green-500/20";
+      case "voting":
+        return "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20";
+      case "completed":
+        return "text-muted-foreground bg-muted border-border";
+      default:
+        return "text-muted-foreground bg-muted border-border";
     }
   };
 
@@ -249,8 +446,26 @@ export default function WelcomePage() {
     { value: "t_shirt", label: "T-Shirt Sizes (XS, S, M, L, XL, XXL)" },
   ];
 
+  // Display recent rooms (show all for demo, limit for authenticated users)
+  const displayRooms = isAuthenticated
+    ? recentRooms.slice(0, 6) // Limit to 6 for authenticated users
+    : recentRooms.slice(0, 8); // Show more for demo effect
+
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-muted/30 to-background relative overflow-hidden">
+      {/* Animated Background Elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-primary/5 dark:bg-primary/10 rounded-full blur-3xl animate-pulse" />
+        <div
+          className="absolute -bottom-40 -left-40 w-80 h-80 bg-secondary/10 dark:bg-secondary/5 rounded-full blur-3xl animate-pulse"
+          style={{ animationDelay: "1s" }}
+        />
+        <div
+          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-accent/5 dark:bg-accent/10 rounded-full blur-3xl animate-pulse"
+          style={{ animationDelay: "2s" }}
+        />
+      </div>
+
       <Header />
 
       {/* Rejoin Room Dialog */}
@@ -304,22 +519,42 @@ export default function WelcomePage() {
       </AlertDialog>
 
       {/* Hero Section */}
-      <section className="flex-1 flex flex-col items-center justify-center px-4 py-12">
+      <section className="flex-1 flex flex-col items-center justify-center px-4 py-12 relative z-10">
         <div className="max-w-4xl mx-auto text-center space-y-8">
           {/* Hero Content */}
           <div className="space-y-6">
-            <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-medium">
-              <Sparkles className="w-4 h-4" />
+            <Badge
+              variant="secondary"
+              className="border bg-primary/10 text-primary border-primary/20"
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
               Streamlined Planning Sessions
-            </div>
+            </Badge>
 
-            <h1 className="text-4xl md:text-6xl font-bold text-slate-900 leading-tight">
-              Plan Better,
+            <h1 className="text-4xl md:text-6xl font-bold leading-tight">
+              <span className="text-foreground">Plan Your Workflows</span>
+              <span className="relative flex w-full justify-center overflow-hidden text-center md:pb-4 md:pt-1">
+                &nbsp;
+                {titles.map((title, index) => (
+                  <motion.span
+                    key={index}
+                    className="absolute font-bold bg-gradient-to-r from-primary to-primary/80 bg-clip-text text-transparent"
+                    initial={{ opacity: 0, y: "-100" }}
+                    transition={{ type: "spring", stiffness: 50 }}
+                    animate={
+                      titleNumber === index
+                        ? { y: 0, opacity: 1 }
+                        : { y: titleNumber > index ? -150 : 150, opacity: 0 }
+                    }
+                  >
+                    {title}
+                  </motion.span>
+                ))}
+              </span>
               <br />
-              <span className="text-blue-600">Estimate Smarter</span>
             </h1>
 
-            <p className="text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
+            <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
               Create collaborative planning sessions with your team. Use proven
               estimation techniques to deliver projects on time and within
               scope.
@@ -329,11 +564,11 @@ export default function WelcomePage() {
           {/* Main Actions */}
           <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto">
             {/* Join Room Card */}
-            <Card className="p-6 hover:shadow-lg transition-shadow border-2 hover:border-blue-200">
+            <Card className="p-6 hover:shadow-xl transition-all duration-300 border-2 hover:border-primary/50 hover:scale-105 group bg-card">
               <CardHeader className="pb-4">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-green-100 rounded-lg">
-                    <Hash className="w-5 h-5 text-green-600" />
+                  <div className="p-2 bg-green-500/10 rounded-lg group-hover:bg-green-500/20 transition-colors border border-green-500/20">
+                    <Hash className="w-5 h-5 text-green-600 dark:text-green-400" />
                   </div>
                   <div>
                     <CardTitle className="text-lg">Join Session</CardTitle>
@@ -346,37 +581,93 @@ export default function WelcomePage() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="room-code">Room Code</Label>
-                  <Input
-                    id="room-code"
-                    placeholder="e.g., ABC123"
-                    value={roomCode}
-                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                    className="text-center text-lg font-mono tracking-wider"
-                    disabled={isLoading}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        handleJoinRoom();
+                  <div className="relative">
+                    <Input
+                      id="room-code"
+                      placeholder="e.g., ABC123"
+                      value={roomCode}
+                      onChange={(e) =>
+                        setRoomCode(e.target.value.toUpperCase())
                       }
-                    }}
-                  />
+                      className={`text-center text-lg font-mono tracking-wider pr-10 transition-all ${
+                        validationState === "valid"
+                          ? "border-green-500 bg-green-50 dark:bg-green-950"
+                          : validationState === "invalid"
+                          ? "border-red-500 bg-red-50 dark:bg-red-950"
+                          : ""
+                      }`}
+                      disabled={isLoading}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleJoinRoom();
+                        }
+                      }}
+                    />
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                      {validationState === "checking" && (
+                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                      )}
+                      {validationState === "valid" && (
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                      )}
+                      {validationState === "invalid" && (
+                        <div className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center">
+                          <span className="text-white text-xs">!</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {validationState === "invalid" && (
+                    <p className="text-sm text-red-600 dark:text-red-400">
+                      Room code must be at least 3 characters
+                    </p>
+                  )}
                 </div>
+
+                {isLoading && joinProgress > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        Joining session...
+                      </span>
+                      <span className="text-muted-foreground">
+                        {joinProgress}%
+                      </span>
+                    </div>
+                    <Progress value={joinProgress} className="h-2" />
+                  </div>
+                )}
+
                 <Button
                   onClick={() => handleJoinRoom()}
-                  className="w-full bg-green-600 hover:bg-green-700"
-                  disabled={isLoading || !roomCode.trim()}
+                  className="w-full bg-green-600 hover:bg-green-700 transition-all duration-200 hover:scale-105"
+                  disabled={
+                    isLoading ||
+                    !roomCode.trim() ||
+                    validationState === "invalid"
+                  }
                 >
-                  {isLoading ? "Joining..." : "Join Session"}
-                  <ArrowRight className="w-4 h-4 ml-2" />
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Joining...
+                    </>
+                  ) : (
+                    <>
+                      Join Session
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </>
+                  )}
                 </Button>
               </CardContent>
             </Card>
 
             {/* Create Room Card */}
-            <Card className="p-6 hover:shadow-lg transition-shadow border-2 hover:border-blue-200">
+            <Card className="p-6 hover:shadow-xl transition-all duration-300 border-2 hover:border-primary/50 hover:scale-105 group bg-card">
               <CardHeader className="pb-4">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-blue-100 rounded-lg">
-                    <Plus className="w-5 h-5 text-blue-600" />
+                  <div className="p-2 bg-primary/10 rounded-lg group-hover:bg-primary/20 transition-colors border border-primary/20">
+                    <Plus className="w-5 h-5 text-primary" />
                   </div>
                   <div>
                     <CardTitle className="text-lg">Create Session</CardTitle>
@@ -394,7 +685,7 @@ export default function WelcomePage() {
                   <DialogTrigger asChild>
                     <Button
                       onClick={handleCreateRoom}
-                      className="w-full bg-blue-600 hover:bg-blue-700"
+                      className="w-full bg-blue-600 hover:bg-blue-700 transition-all duration-200 hover:scale-105"
                       disabled={isLoading}
                     >
                       Create New Session
@@ -578,7 +869,14 @@ export default function WelcomePage() {
                         disabled={isLoading || !roomSettings.projectName.trim()}
                         className="bg-blue-600 hover:bg-blue-700"
                       >
-                        {isLoading ? "Creating..." : "Create Session"}
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Creating...
+                          </>
+                        ) : (
+                          "Create Session"
+                        )}
                       </Button>
                     </div>
                   </DialogContent>
@@ -587,34 +885,60 @@ export default function WelcomePage() {
             </Card>
           </div>
 
-          {/* Recent Rooms Section */}
-          {isAuthenticated && recentRooms.length > 0 && (
-            <div className="max-w-2xl mx-auto">
-              <div className="flex items-center gap-2 mb-4">
-                <History className="w-5 h-5 text-slate-600" />
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Recent Sessions
-                </h2>
+          {/* Recent/Active Rooms Section */}
+          {displayRooms.length > 0 && (
+            <div className="max-w-5xl mx-auto h-auto p-2">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-muted-foreground" />
+                  <h2 className="text-lg font-semibold text-foreground">
+                    {isAuthenticated ? "Recent Sessions" : "Live Activity"}
+                  </h2>
+                  {!isAuthenticated && (
+                    <Badge
+                      variant="secondary"
+                      className="bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
+                    >
+                      <div className="w-2 h-2 bg-green-500 rounded-full mr-1 animate-pulse" />
+                      Live
+                    </Badge>
+                  )}
+                </div>
+
+                {!isAuthenticated && (
+                  <p className="text-sm text-muted-foreground">
+                    Join thousands of teams already using our platform
+                  </p>
+                )}
               </div>
 
-              <div className="grid gap-3">
-                {recentRooms.map((room) => (
+              <div className="grid md:grid-cols-2 gap-3 max-h-96 overflow-y-auto p-1">
+                {displayRooms.map((room, index) => (
                   <Card
                     key={room.id}
-                    className="p-4 hover:shadow-md transition-shadow cursor-pointer border hover:border-blue-200"
+                    className={`p-4 transition-all duration-500 cursor-pointer border hover:border-primary/50 hover:shadow-md hover:scale-102 bg-card ${
+                      room.isNew
+                        ? "border-green-500/50 bg-green-500/5 dark:bg-green-500/10"
+                        : ""
+                    }`}
+                    style={{
+                      animationDelay: `${index * 100}ms`,
+                    }}
                     onClick={() => handleJoinRoom(room.code)}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-slate-100 rounded-lg">
-                          <Hash className="w-4 h-4 text-slate-600" />
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="p-2 bg-muted rounded-lg flex-shrink-0">
+                          <Hash className="w-4 h-4 text-muted-foreground" />
                         </div>
-                        <div>
-                          <h3 className="font-medium text-slate-900">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-medium text-foreground truncate">
                             {room.projectName}
                           </h3>
-                          <div className="flex items-center gap-4 text-sm text-slate-500">
-                            <span>Code: {room.code}</span>
+                          <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
+                            <span className="font-mono text-xs bg-muted px-2 py-1 rounded">
+                              {room.code}
+                            </span>
                             <span className="flex items-center gap-1">
                               <Users className="w-3 h-3" />
                               {room.participantCount}
@@ -624,46 +948,89 @@ export default function WelcomePage() {
                               {room.lastJoined}
                             </span>
                           </div>
+                          {room.status === "voting" &&
+                            room.progress !== undefined && (
+                              <div className="mt-2">
+                                <Progress
+                                  value={room.progress}
+                                  className="h-1"
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {room.progress}% voted
+                                </p>
+                              </div>
+                            )}
                         </div>
                       </div>
-                      <ArrowRight className="w-4 h-4 text-slate-400" />
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Badge
+                          variant="secondary"
+                          className={`inline-flex items-center gap-1 ${getStatusColor(
+                            room.status
+                          )}`}
+                        >
+                          {getStatusIcon(room.status)}
+                          {getStatusText(room.status)}
+                        </Badge>
+                        <ExternalLink className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
                     </div>
                   </Card>
                 ))}
               </div>
+
+              {!isAuthenticated && (
+                <div className="text-center mt-6">
+                  <p className="text-sm text-muted-foreground mb-3">
+                    See your own sessions by creating an account
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate("/signup")}
+                    className="border-primary/20 text-primary hover:bg-primary/5"
+                  >
+                    Sign Up Free
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
           {/* Features Section */}
           <div className="grid md:grid-cols-3 gap-6 max-w-4xl mx-auto pt-12">
-            <div className="text-center space-y-3">
-              <div className="p-3 bg-blue-100 rounded-full w-fit mx-auto">
-                <Zap className="w-6 h-6 text-blue-600" />
+            <div className="text-center space-y-3 group">
+              <div className="p-3 bg-primary/10 rounded-full w-fit mx-auto group-hover:bg-primary/20 transition-colors group-hover:scale-110 transform duration-200 border border-primary/20">
+                <Zap className="w-6 h-6 text-primary" />
               </div>
-              <h3 className="font-semibold text-slate-900">Fast & Intuitive</h3>
-              <p className="text-sm text-slate-600">
+              <h3 className="font-semibold text-foreground">
+                Fast & Intuitive
+              </h3>
+              <p className="text-sm text-muted-foreground">
                 Get started in seconds with our streamlined interface
               </p>
             </div>
 
-            <div className="text-center space-y-3">
-              <div className="p-3 bg-green-100 rounded-full w-fit mx-auto">
-                <Users className="w-6 h-6 text-green-600" />
+            <div className="text-center space-y-3 group">
+              <div className="p-3 bg-green-500/10 rounded-full w-fit mx-auto group-hover:bg-green-500/20 transition-colors group-hover:scale-110 transform duration-200 border border-green-500/20">
+                <Users className="w-6 h-6 text-green-600 dark:text-green-400" />
               </div>
-              <h3 className="font-semibold text-slate-900">
+              <h3 className="font-semibold text-foreground">
                 Team Collaboration
               </h3>
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-muted-foreground">
                 Real-time voting and discussion with your team
               </p>
             </div>
 
-            <div className="text-center space-y-3">
-              <div className="p-3 bg-purple-100 rounded-full w-fit mx-auto">
-                <Shield className="w-6 h-6 text-purple-600" />
+            <div className="text-center space-y-3 group">
+              <div className="p-3 bg-purple-500/10 rounded-full w-fit mx-auto group-hover:bg-purple-500/20 transition-colors group-hover:scale-110 transform duration-200 border border-purple-500/20">
+                <Shield className="w-6 h-6 text-purple-600 dark:text-purple-400" />
               </div>
-              <h3 className="font-semibold text-slate-900">Secure & Private</h3>
-              <p className="text-sm text-slate-600">
+              <h3 className="font-semibold text-foreground">
+                Secure & Private
+              </h3>
+              <p className="text-sm text-muted-foreground">
                 Your planning sessions are private and secure
               </p>
             </div>

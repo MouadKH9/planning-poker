@@ -22,11 +22,11 @@ export function ParticipantCard({
   return (
     <motion.div
       className={cn(
-        "border rounded-lg p-4 text-center transition-all",
+        "border rounded-lg p-4 text-center transition-all bg-card",
         participant.has_voted
-          ? "border-green-200 bg-green-50"
-          : "border-gray-200 bg-white",
-        participant.is_anonymous && "border-dashed" // Visual indicator for anonymous users
+          ? "border-green-500/30 bg-green-500/5 dark:border-green-400/30 dark:bg-green-400/5"
+          : "border-border bg-card",
+        participant.is_anonymous && "border-dashed border-purple-500/50 dark:border-purple-400/50"
       )}
       whileHover={{ y: -5 }}
       transition={{ type: "spring", stiffness: 300 }}
@@ -34,8 +34,8 @@ export function ParticipantCard({
       <div className="flex items-center justify-between mb-2">
         <span
           className={cn(
-            "text-sm font-medium",
-            participant.is_anonymous && "text-purple-600 font-bold"
+            "text-sm font-medium text-foreground",
+            participant.is_anonymous && "text-purple-600 dark:text-purple-400 font-bold"
           )}
         >
           {participant.is_anonymous
@@ -44,13 +44,15 @@ export function ParticipantCard({
         </span>
         <div className="mt-2 h-12 flex items-center justify-center">
           {isHost && !participant.has_voted && (
-            <span className="text-red-500 text-sm">Waiting for vote...</span>
+            <span className="text-destructive dark:text-red-400 text-sm">
+              Waiting for vote...
+            </span>
           )}
           {isHost && participant.has_voted && (
             <Button
               size="sm"
               variant="outline"
-              className="text-blue-600 text-sm hover:underline"
+              className="text-blue-600 dark:text-blue-400 text-sm hover:underline border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-950"
               onClick={onSkip}
             >
               Skip
@@ -59,7 +61,7 @@ export function ParticipantCard({
           {participant.vote !== null ? (
             isRevealed ? (
               <motion.div
-                className="bg-zinc-100 h-10 w-8 rounded flex items-center justify-center font-bold"
+                className="bg-muted dark:bg-muted h-10 w-8 rounded flex items-center justify-center font-bold text-foreground border border-border shadow-sm"
                 initial={{ rotateY: 180, opacity: 0 }}
                 animate={{ rotateY: 0, opacity: 1 }}
                 transition={{ duration: 0.5 }}
@@ -68,12 +70,12 @@ export function ParticipantCard({
               </motion.div>
             ) : (
               <motion.div
-                className="bg-zinc-800 h-10 w-8 rounded"
+                className="bg-primary dark:bg-primary h-10 w-8 rounded shadow-sm border border-border"
                 whileHover={{ scale: 1.05 }}
               />
             )
           ) : (
-            <span className="text-zinc-400 text-sm">No vote</span>
+            <span className="text-muted-foreground text-sm">No vote</span>
           )}
         </div>
       </div>
