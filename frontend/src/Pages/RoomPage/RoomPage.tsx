@@ -234,7 +234,7 @@ export default function RoomPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <div className="relative mb-6">
+          <div className="relative mb-6 flex items-center justify-center">
             <div className="w-16 h-16 border-4 border-muted rounded-full"></div>
             <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin absolute top-0"></div>
           </div>
