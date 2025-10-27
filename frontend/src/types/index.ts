@@ -21,6 +21,7 @@ export interface RoomState {
   user_role?: "admin" | "participant";
   can_control?: boolean;
   is_anonymous?: boolean;
+  anonymous_session_id?: string | null;
   current_user?: {
     id: number | null;
     username: string;
@@ -76,6 +77,34 @@ export class PlanningPokerWebSocket {
     this.roomId = roomId;
   }
 
+  private getOrCreateAnonymousSessionId(): string {
+    const STORAGE_KEY = "planning_poker_anonymous_session_id";
+    let sessionId = localStorage.getItem(STORAGE_KEY);
+
+    if (!sessionId) {
+      // Generate a new UUID
+      sessionId = this.generateUUID();
+      localStorage.setItem(STORAGE_KEY, sessionId);
+      console.log("Generated new anonymous session ID:", sessionId);
+    } else {
+      console.log("Using existing anonymous session ID:", sessionId);
+    }
+
+    return sessionId;
+  }
+
+  private generateUUID(): string {
+    // Simple UUID v4 generator
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+      /[xy]/g,
+      function (c) {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      }
+    );
+  }
+
   connect(): Promise<void> {
     if (this.isConnecting) {
       return Promise.reject(new Error("Connection already in progress"));
@@ -87,11 +116,23 @@ export class PlanningPokerWebSocket {
     return new Promise((resolve, reject) => {
       const token = localStorage.getItem("access_token");
       const wsBaseUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000";
+      console.log("wsBaseUrl", wsBaseUrl);
 
-      // Build WebSocket URL - include token if available, otherwise connect anonymously
+      // Build WebSocket URL
       let wsUrl = `${wsBaseUrl}/ws/rooms/${this.roomId}/`;
+      const params: string[] = [];
+
+      // Add token if available for authenticated users
       if (token) {
-        wsUrl += `?token=${token}`;
+        params.push(`token=${token}`);
+      } else {
+        // For anonymous users, add session ID
+        const sessionId = this.getOrCreateAnonymousSessionId();
+        params.push(`anonymous_session_id=${sessionId}`);
+      }
+
+      if (params.length > 0) {
+        wsUrl += `?${params.join("&")}`;
       }
 
       console.log("Connecting to WebSocket:", wsUrl);

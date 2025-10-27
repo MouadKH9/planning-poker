@@ -67,8 +67,68 @@ export default function RoomPage() {
       setCanControl(data.can_control || false);
       setIsAnonymous(data.is_anonymous || false);
       setIsLoading(false);
+
+      // Update timer state if provided
+      if (data.timer_state) {
+        setTimerState(data.timer_state);
+      } else {
+        setTimerState(null);
+      }
+
+      // Determine if cards are revealed based on room status
+      const cardsRevealed = data.room.status === "COMPLETED";
+      setIsRevealed(cardsRevealed);
+
+      // Calculate voting stats if cards are revealed
+      if (cardsRevealed && data.participants.length > 0) {
+        const numericVotes = data.participants
+          .filter((p) => p.card_selection && p.card_selection !== "SKIPPED")
+          .map((p) => p.card_selection)
+          .filter((v) => v && !isNaN(parseFloat(v)))
+          .map((v) => parseFloat(v!));
+
+        if (numericVotes.length > 0) {
+          const average = numericVotes.reduce((a, b) => a + b, 0) / numericVotes.length;
+          const min = Math.min(...numericVotes);
+          const max = Math.max(...numericVotes);
+          const consensus = new Set(numericVotes).size === 1;
+
+          setVotingStats({
+            average: Math.round(average * 100) / 100,
+            min,
+            max,
+            consensus,
+            total_votes: data.participants.filter((p) => p.card_selection).length,
+          });
+        } else {
+          setVotingStats({
+            average: 0,
+            min: 0,
+            max: 0,
+            consensus: false,
+            total_votes: data.participants.filter((p) => p.card_selection).length,
+          });
+        }
+      } else {
+        setVotingStats(null);
+      }
+
+      // If we're anonymous and received a session ID, ensure it's stored
+      if (data.is_anonymous && data.anonymous_session_id) {
+        const storedSessionId = localStorage.getItem(
+          "planning_poker_anonymous_session_id"
+        );
+        if (storedSessionId !== data.anonymous_session_id) {
+          localStorage.setItem(
+            "planning_poker_anonymous_session_id",
+            data.anonymous_session_id
+          );
+          console.log("Updated anonymous session ID:", data.anonymous_session_id);
+        }
+      }
     });
 
+    // Notification events (toast messages only, no state updates)
     ws.on("user_connected", (data) => {
       const userType = data.is_anonymous
         ? `🎭 ${data.username} (Guest)`
@@ -83,68 +143,8 @@ export default function RoomPage() {
       toast.info(`${userType} left the room`);
     });
 
-    ws.on("vote_submitted", (data) => {
-      setParticipants((prev) =>
-        prev.map((p) =>
-          p.user_id === data.user_id ? { ...p, has_voted: true } : p
-        )
-      );
-      const userType = data.is_anonymous
-        ? `🎭 ${data.username} (Guest)`
-        : data.username;
-      toast.success(`${userType} voted`);
-    });
-
-    ws.on("cards_revealed", (data) => {
-      setParticipants(data.participants);
-      setVotingStats(data.statistics);
-      setIsRevealed(true);
-
-      if (data.auto_revealed) {
-        toast.success("Cards auto-revealed - everyone voted!");
-      } else {
-        toast.success("Cards revealed!");
-      }
-    });
-
-    ws.on("votes_reset", () => {
-      setParticipants((prev) =>
-        prev.map((p) => ({
-          ...p,
-          card_selection: null,
-          has_voted: false,
-        }))
-      );
-      setSelectedCard(null);
-      setIsRevealed(false);
-      setVotingStats(null);
-      toast.info("Votes reset");
-    });
-
-    ws.on("round_started", () => {
-      setParticipants((prev) =>
-        prev.map((p) => ({
-          ...p,
-          card_selection: null,
-          has_voted: false,
-        }))
-      );
-      setSelectedCard(null);
-      setIsRevealed(false);
-      setVotingStats(null);
-      toast.success("New round started!");
-    });
-
-    ws.on("participant_skipped", (data) => {
-      setParticipants((prev) =>
-        prev.map((p) =>
-          p.id === data.participant_id
-            ? { ...p, card_selection: "SKIPPED", has_voted: true }
-            : p
-        )
-      );
-      toast.info("Participant skipped");
-    });
+    // Note: All state updates now happen through room_state event
+    // These events are kept for backward compatibility but don't update state
 
     ws.on("error", (data) => {
       toast.error(data.message);
@@ -163,39 +163,6 @@ export default function RoomPage() {
       }
     });
 
-    ws.on("timer_started", (data) => {
-      setTimerState({
-        is_active: true,
-        start_time: data.start_time,
-        end_time: new Date(
-          new Date(data.start_time).getTime() + data.duration * 1000
-        ).toISOString(),
-        duration: data.duration,
-      });
-      toast.success("Timer started!");
-    });
-
-    ws.on("timer_stopped", () => {
-      setTimerState(null);
-      toast.info("Timer stopped");
-    });
-
-    ws.on("timer_paused", () => {
-      if (timerState) {
-        setTimerState({
-          ...timerState,
-          is_active: false,
-        });
-      }
-      toast.info("Timer paused");
-    });
-
-    ws.on("timer_expired", () => {
-      toast.warning("⏰ Time's up!", {
-        description: "Consider revealing cards or starting a new timer",
-      });
-    });
-
     ws.on("room_auto_closed", (data) => {
       toast.error("Room closed", {
         description: data.reason,
@@ -203,19 +170,6 @@ export default function RoomPage() {
       setTimeout(() => {
         window.location.href = "/";
       }, 3000);
-    });
-    // Add this inside the useEffect where WebSocket event listeners are set up
-
-    ws.on("timer_paused", () => {
-      setTimerState((prev) =>
-        prev
-          ? {
-              ...prev,
-              is_active: false,
-            }
-          : null
-      );
-      toast.info("Timer paused");
     });
 
     ws.connect()
@@ -490,9 +444,8 @@ export default function RoomPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <div
-                    className={`w-2 h-2 rounded-full ${
-                      allVoted ? "bg-green-500" : "bg-yellow-500"
-                    }`}
+                    className={`w-2 h-2 rounded-full ${allVoted ? "bg-green-500" : "bg-yellow-500"
+                      }`}
                   />
                   <span className="text-sm text-muted-foreground">
                     {allVoted ? "All votes received" : "Waiting for votes..."}
@@ -583,11 +536,10 @@ export default function RoomPage() {
                     </div>
                     <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 text-center">
                       <div
-                        className={`text-2xl font-bold ${
-                          votingStats.consensus
-                            ? "text-green-600 dark:text-green-400"
-                            : "text-red-600 dark:text-red-400"
-                        }`}
+                        className={`text-2xl font-bold ${votingStats.consensus
+                          ? "text-green-600 dark:text-green-400"
+                          : "text-red-600 dark:text-red-400"
+                          }`}
                       >
                         {votingStats.consensus ? "✓" : "✗"}
                       </div>
@@ -610,7 +562,7 @@ export default function RoomPage() {
               <h3 className="text-lg font-semibold text-foreground mb-4">
                 Participants
               </h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {participants.map((participant) => (
                   <ParticipantCard
                     key={participant.id}

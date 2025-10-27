@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from planning_poker.models import Room, Participant, SessionLog, UserRole
+from planning_poker.models import Room, Participant, SessionLog, UserRole, AnonymousSession
 
 
 class ParticipantInline(admin.TabularInline):
@@ -119,6 +119,24 @@ class UserRoleAdmin(admin.ModelAdmin):
         return obj.user.date_joined
 
     user_date_joined.short_description = "Date Joined"
+
+
+@admin.register(AnonymousSession)
+class AnonymousSessionAdmin(admin.ModelAdmin):
+    list_display = ["session_id_short", "user", "username", "created_at", "last_seen"]
+    list_filter = ["created_at", "last_seen"]
+    search_fields = ["session_id", "user__username"]
+    readonly_fields = ["session_id", "user", "created_at", "last_seen"]
+
+    def session_id_short(self, obj):
+        return f"{obj.session_id[:8]}..."
+
+    session_id_short.short_description = "Session ID"
+
+    def username(self, obj):
+        return obj.user.username
+
+    username.short_description = "Username"
 
 
 # Re-register UserAdmin

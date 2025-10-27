@@ -2,7 +2,7 @@ import json
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from planning_poker.models import Room, Participant, SessionLog, UserRole
+from planning_poker.models import Room, Participant, SessionLog, UserRole, AnonymousSession
 from planning_poker.fields import STATUS_CHOICES, POINT_SYSTEMS, POINT_SYSTEM_CARDS
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import AccessToken
@@ -12,6 +12,7 @@ from django.utils import timezone
 from datetime import timedelta
 import asyncio
 import random
+import uuid
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -23,6 +24,7 @@ class RoomConsumer(AsyncWebsocketConsumer):
         self.room = None
         self.user = None
         self.is_anonymous_user = False
+        self.anonymous_session_id = None
         self.room_group_name = None
         self.is_connected = False
 
@@ -33,9 +35,9 @@ class RoomConsumer(AsyncWebsocketConsumer):
         # Authenticate user from JWT token in query string
         self.user = await self.authenticate_user_from_token()
         if not self.user:
-            # Create a temporary anonymous user that can participate
-            logger.info(f"Creating temporary anonymous user for room {self.room_code}")
-            self.user = await self.create_temporary_user()
+            # Try to get or create anonymous user based on session ID
+            logger.info(f"No authenticated user, checking for anonymous session")
+            self.user, self.anonymous_session_id = await self.get_or_create_anonymous_user()
             self.is_anonymous_user = True
         else:
             self.scope["user"] = self.user
@@ -65,7 +67,7 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 await self.update_admin_last_room(self.user, self.room)
 
             # Create participant for both authenticated and anonymous users
-            await self.get_or_create_participant(self.user, self.room)
+            participant = await self.get_or_create_participant(self.user, self.room)
             logger.info(
                 f"Participant created/found: {self.user.username} in room {self.room.code}"
             )
@@ -73,14 +75,18 @@ class RoomConsumer(AsyncWebsocketConsumer):
             await self.channel_layer.group_add(self.room_group_name, self.channel_name)
             await self.accept()
             self.is_connected = True
+            
+            # Send initial room state to the connecting user
             await self.send_room_state()
 
-            # Notify others about user connection
+            # Broadcast updated room state to all users
+            await self.broadcast_room_state()
+
+            # Send notification for toast message
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
-                    "type": "user_connected",
-                    "user_id": self.user.id,
+                    "type": "user_connected_notification",
                     "username": self.user.username,
                     "is_anonymous": self.is_anonymous_user,
                 },
@@ -96,21 +102,28 @@ class RoomConsumer(AsyncWebsocketConsumer):
             # Only send disconnect message if we were properly connected
             if hasattr(self, "room") and self.room:
                 try:
+                    # Store username before cleanup
+                    username = self.user.username
+                    is_anonymous = getattr(self, "is_anonymous_user", False)
+
+                    # Clean up temporary user and participant when they disconnect
+                    if is_anonymous:
+                        await self.cleanup_anonymous_user(self.user)
+
+                    # Broadcast updated room state to remaining users
+                    await self.broadcast_room_state()
+
+                    # Send notification for toast message
                     await self.channel_layer.group_send(
                         self.room_group_name,
                         {
-                            "type": "user_disconnected",
-                            "user_id": self.user.id,
-                            "username": self.user.username,
-                            "is_anonymous": getattr(self, "is_anonymous_user", False),
+                            "type": "user_disconnected_notification",
+                            "username": username,
+                            "is_anonymous": is_anonymous,
                         },
                     )
                 except Exception as e:
                     logger.warning(f"Error sending disconnect notification: {e}")
-
-            # Clean up temporary user and participant when they disconnect
-            if getattr(self, "is_anonymous_user", False):
-                await self.cleanup_anonymous_user(self.user)
 
             # Remove from channel group
             try:
@@ -178,16 +191,8 @@ class RoomConsumer(AsyncWebsocketConsumer):
         participant = await self.get_or_create_participant(self.user, self.room)
         await self.update_participant_vote(participant, card_value)
 
-        # Broadcast vote submission
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "vote_submitted",
-                "user_id": self.user.id,
-                "username": self.user.username,
-                "is_anonymous": getattr(self, "is_anonymous_user", False),
-            },
-        )
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
         # Check for auto-reveal if enabled and all participants have voted
         if await self.should_auto_reveal(self.room):
@@ -204,14 +209,9 @@ class RoomConsumer(AsyncWebsocketConsumer):
         await self.create_session_log(self.room, stats, participants_data)
 
         await self.update_room_status(self.room, STATUS_CHOICES.COMPLETED)
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "cards_revealed",
-                "participants": participants_data,
-                "statistics": stats,
-            },
-        )
+        
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
     async def handle_reset_votes(self, data):
         if not await self.can_control_game(self.room, self.user):
@@ -219,12 +219,9 @@ class RoomConsumer(AsyncWebsocketConsumer):
             return
         await self.reset_all_votes(self.room)
         await self.update_room_status(self.room, STATUS_CHOICES.ACTIVE)
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "votes_reset",
-            },
-        )
+        
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
     async def handle_skip_participant(self, data):
         participant_id = data.get("participant_id")
@@ -235,13 +232,9 @@ class RoomConsumer(AsyncWebsocketConsumer):
             await self.send_error("Only admins or room hosts can skip participants")
             return
         await self.skip_participant_db(participant_id, self.room)
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "participant_skipped",
-                "participant_id": participant_id,
-            },
-        )
+        
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
     async def handle_start_round(self, data):
         if not await self.can_control_game(self.room, self.user):
@@ -249,13 +242,9 @@ class RoomConsumer(AsyncWebsocketConsumer):
             return
         await self.reset_all_votes(self.room)
         await self.update_room_status(self.room, STATUS_CHOICES.ACTIVE)
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "round_started",
-                "story_title": data.get("story_title", ""),
-            },
-        )
+        
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
     async def handle_start_timer(self, data):
         if not await self.can_control_game(self.room, self.user):
@@ -269,14 +258,8 @@ class RoomConsumer(AsyncWebsocketConsumer):
         timer_duration = data.get("duration", self.room.timer_duration)
         await self.start_room_timer(self.room, timer_duration)
 
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "timer_started",
-                "duration": timer_duration,
-                "start_time": timezone.now().isoformat(),
-            },
-        )
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
     async def handle_stop_timer(self, data):
         if not await self.can_control_game(self.room, self.user):
@@ -285,12 +268,8 @@ class RoomConsumer(AsyncWebsocketConsumer):
 
         await self.stop_room_timer(self.room)
 
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "timer_stopped",
-            },
-        )
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
     async def handle_pause_timer(self, data):
         if not await self.can_control_game(self.room, self.user):
@@ -299,12 +278,8 @@ class RoomConsumer(AsyncWebsocketConsumer):
 
         await self.pause_room_timer(self.room)
 
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                "type": "timer_paused",
-            },
-        )
+        # Broadcast updated room state
+        await self.broadcast_room_state()
 
     async def handle_chat_message(self, data):
         message = data.get("message", "").strip()
@@ -375,6 +350,7 @@ class RoomConsumer(AsyncWebsocketConsumer):
                     "user_role": user_role,
                     "can_control": can_control,
                     "is_anonymous": getattr(self, "is_anonymous_user", False),
+                    "anonymous_session_id": getattr(self, "anonymous_session_id", None),
                     "current_user": {
                         "id": self.user.id if self.user else None,
                         "username": self.user.username if self.user else "Guest",
@@ -385,7 +361,54 @@ class RoomConsumer(AsyncWebsocketConsumer):
         )
 
     # WebSocket event handlers
-    async def user_connected(self, event):
+    async def room_state_update(self, event):
+        """Send room state update to this specific client"""
+        if not self.is_connected:
+            return
+        try:
+            # Determine user-specific permissions
+            is_host = (
+                self.room.host == self.user
+                if self.user and not getattr(self, "is_anonymous_user", False)
+                else False
+            )
+            user_role = (
+                await self.get_user_role_string(self.user)
+                if self.user and not getattr(self, "is_anonymous_user", False)
+                else "participant"
+            )
+            can_control = (
+                await self.can_control_game(self.room, self.user)
+                if self.user and not getattr(self, "is_anonymous_user", False)
+                else False
+            )
+
+            await self.send(
+                text_data=json.dumps(
+                    {
+                        "type": "room_state",
+                        "room": event["room"],
+                        "participants": event["participants"],
+                        "card_values": event["card_values"],
+                        "timer_state": event["timer_state"],
+                        "is_host": is_host,
+                        "user_role": user_role,
+                        "can_control": can_control,
+                        "is_anonymous": getattr(self, "is_anonymous_user", False),
+                        "anonymous_session_id": getattr(self, "anonymous_session_id", None),
+                        "current_user": {
+                            "id": self.user.id if self.user else None,
+                            "username": self.user.username if self.user else "Guest",
+                            "is_anonymous": getattr(self, "is_anonymous_user", False),
+                        },
+                    }
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Error sending room_state_update: {e}")
+
+    async def user_connected_notification(self, event):
+        """Send notification when a user connects (for toast messages only)"""
         if not self.is_connected:
             return
         try:
@@ -393,16 +416,16 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 text_data=json.dumps(
                     {
                         "type": "user_connected",
-                        "user_id": event["user_id"],
                         "username": event["username"],
                         "is_anonymous": event.get("is_anonymous", False),
                     }
                 )
             )
         except Exception as e:
-            logger.warning(f"Error sending user_connected message: {e}")
+            logger.warning(f"Error sending user_connected notification: {e}")
 
-    async def user_disconnected(self, event):
+    async def user_disconnected_notification(self, event):
+        """Send notification when a user disconnects (for toast messages only)"""
         if not self.is_connected:
             return
         try:
@@ -410,14 +433,13 @@ class RoomConsumer(AsyncWebsocketConsumer):
                 text_data=json.dumps(
                     {
                         "type": "user_disconnected",
-                        "user_id": event["user_id"],
                         "username": event["username"],
                         "is_anonymous": event.get("is_anonymous", False),
                     }
                 )
             )
         except Exception as e:
-            logger.warning(f"Error sending user_disconnected message: {e}")
+            logger.warning(f"Error sending user_disconnected notification: {e}")
 
     async def vote_submitted(self, event):
         if not self.is_connected:
@@ -626,6 +648,36 @@ class RoomConsumer(AsyncWebsocketConsumer):
 
         return timezone.now().isoformat()
 
+    async def broadcast_room_state(self):
+        """Broadcast complete room state to all connected users"""
+        try:
+            participants = await self.get_participants_with_votes(self.room)
+            card_values = await self.get_room_card_values(self.room)
+            timer_state = await self.get_timer_state(self.room)
+
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    "type": "room_state_update",
+                    "room": {
+                        "id": self.room.id,
+                        "code": self.room.code,
+                        "project_name": self.room.project_name,
+                        "point_system": self.room.point_system,
+                        "status": self.room.status,
+                        "host_username": self.room.host.username,
+                        "enable_timer": self.room.enable_timer,
+                        "timer_duration": self.room.timer_duration,
+                    },
+                    "participants": participants,
+                    "card_values": card_values,
+                    "timer_state": timer_state,
+                },
+            )
+            logger.info(f"Broadcasted room state to group {self.room_group_name}")
+        except Exception as e:
+            logger.error(f"Error broadcasting room state: {e}")
+
     async def auto_reveal_cards(self):
         """Automatically reveal cards when all participants have voted"""
         try:
@@ -639,15 +691,8 @@ class RoomConsumer(AsyncWebsocketConsumer):
 
             await self.update_room_status(self.room, STATUS_CHOICES.COMPLETED)
 
-            # Broadcast auto-reveal message
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    "type": "cards_auto_revealed",
-                    "participants": participants_data,
-                    "statistics": stats,
-                },
-            )
+            # Broadcast updated room state
+            await self.broadcast_room_state()
 
         except Exception as e:
             logger.error(f"Error during auto-reveal: {e}")
@@ -911,14 +956,63 @@ class RoomConsumer(AsyncWebsocketConsumer):
             return False
 
     @database_sync_to_async
+    def get_participant_data(self, participant):
+        """Get complete participant data for broadcasting"""
+        try:
+            # Refresh from database to get related data
+            participant = Participant.objects.select_related("user", "user__role").get(
+                id=participant.id
+            )
+
+            return {
+                "id": participant.id,
+                "user_id": participant.user.id,
+                "username": participant.user.username,
+                "card_selection": participant.card_selection,
+                "has_voted": bool(participant.card_selection),
+                "vote": None,  # Hidden until revealed
+                "user_role": (
+                    participant.user.role.role
+                    if hasattr(participant.user, "role") and participant.user.role
+                    else "participant"
+                ),
+                "is_anonymous": not participant.user.is_active,
+            }
+        except Exception as e:
+            logger.error(f"Error getting participant data: {e}")
+            return None
+
+    @database_sync_to_async
+    def get_participant_by_user(self, user, room):
+        """Get participant by user and room"""
+        try:
+            return Participant.objects.get(user=user, room=room)
+        except Participant.DoesNotExist:
+            return None
+
+    @database_sync_to_async
     def cleanup_anonymous_user(self, user):
         """Clean up temporary user and their data when they disconnect"""
         try:
             if user and hasattr(user, "id") and user.id:
+                # Check if user has an anonymous session
+                try:
+                    session = AnonymousSession.objects.get(user=user)
+                    # Don't delete the user if they have a session - they might reconnect
+                    # Just remove their participant record from this room
+                    Participant.objects.filter(user=user, room=self.room).delete()
+                    logger.info(
+                        f"Removed participant for session user: {user.username}, but kept session"
+                    )
+                    return
+                except AnonymousSession.DoesNotExist:
+                    # No session, proceed with full cleanup
+                    pass
+
                 # Remove participant record
                 Participant.objects.filter(user=user).delete()
 
-                # Remove temporary user (only if they're marked as inactive)
+                # Remove temporary user (only if they're marked as inactive and have no session)
                 if hasattr(user, "is_active") and not user.is_active:
                     User.objects.filter(id=user.id, is_active=False).delete()
                     logger.info(f"Cleaned up temporary user: {user.username}")
@@ -1059,6 +1153,164 @@ class RoomConsumer(AsyncWebsocketConsumer):
                     "is_anonymous": True,
                 },
             )()
+
+    @database_sync_to_async
+    def get_or_create_anonymous_user(self):
+        """Get or create anonymous user based on session ID"""
+        try:
+            # Extract session ID from query parameters
+            query_string = self.scope.get("query_string", b"").decode()
+            query_params = parse_qs(query_string)
+            session_id = query_params.get("anonymous_session_id", [None])[0]
+
+            if session_id:
+                # Try to find existing session
+                try:
+                    session = AnonymousSession.objects.select_related("user").get(
+                        session_id=session_id
+                    )
+                    # Update last_seen timestamp
+                    session.last_seen = timezone.now()
+                    session.save()
+                    logger.info(
+                        f"Found existing anonymous session for user: {session.user.username}"
+                    )
+                    return session.user, session_id
+                except AnonymousSession.DoesNotExist:
+                    logger.info(f"Session ID provided but not found: {session_id}")
+                    # Session ID provided but doesn't exist, create new user with new session
+                    pass
+
+            # Generate new session ID if not provided or not found
+            new_session_id = str(uuid.uuid4())
+
+            # Create new temporary user
+            user = self._create_temp_user()
+
+            # Create anonymous session
+            AnonymousSession.objects.create(session_id=new_session_id, user=user)
+
+            logger.info(
+                f"Created new anonymous session {new_session_id} for user: {user.username}"
+            )
+            return user, new_session_id
+
+        except Exception as e:
+            logger.error(f"Error in get_or_create_anonymous_user: {e}")
+            # Fallback: create user without session
+            user = self._create_temp_user()
+            return user, str(uuid.uuid4())
+
+    def _create_temp_user(self):
+        """Helper to create a temporary user with cool username"""
+        from django.contrib.auth.models import User
+
+        # Cool anonymous username generators
+        cool_adjectives = [
+            "Shadow",
+            "Neon",
+            "Cyber",
+            "Quantum",
+            "Digital",
+            "Mystic",
+            "Stealth",
+            "Phantom",
+            "Chrome",
+            "Plasma",
+            "Lunar",
+            "Solar",
+            "Cosmic",
+            "Electric",
+            "Atomic",
+            "Stellar",
+            "Vector",
+            "Matrix",
+            "Neural",
+            "Blade",
+            "Storm",
+            "Flash",
+            "Turbo",
+            "Ultra",
+            "Phoenix",
+            "Dragon",
+            "Wolf",
+            "Eagle",
+        ]
+
+        cool_nouns = [
+            "Warrior",
+            "Hunter",
+            "Ninja",
+            "Samurai",
+            "Guardian",
+            "Ranger",
+            "Scout",
+            "Assassin",
+            "Pilot",
+            "Hacker",
+            "Coder",
+            "Engineer",
+            "Architect",
+            "Designer",
+            "Builder",
+            "Maker",
+            "Knight",
+            "Mage",
+            "Wizard",
+            "Sorcerer",
+            "Sage",
+            "Oracle",
+            "Prophet",
+            "Mystic",
+            "Ghost",
+            "Spirit",
+            "Phantom",
+            "Shadow",
+            "Reaper",
+            "Sentinel",
+            "Warden",
+            "Keeper",
+            "Storm",
+            "Blaze",
+            "Frost",
+            "Thunder",
+            "Lightning",
+            "Vortex",
+            "Cyclone",
+            "Tsunami",
+            "Star",
+            "Comet",
+            "Meteor",
+            "Nova",
+            "Galaxy",
+            "Nebula",
+            "Pulsar",
+            "Quasar",
+        ]
+
+        # Generate a cool username
+        adjective = random.choice(cool_adjectives)
+        noun = random.choice(cool_nouns)
+        number = random.randint(100, 999)
+        username = f"{adjective}{noun}{number}"
+
+        # Ensure uniqueness by checking if username exists
+        while User.objects.filter(username=username).exists():
+            adjective = random.choice(cool_adjectives)
+            noun = random.choice(cool_nouns)
+            number = random.randint(100, 999)
+            username = f"{adjective}{noun}{number}"
+
+        # Create a temporary user (no password, marked as inactive)
+        temp_user = User.objects.create(
+            username=username,
+            email=f"{username}@temp.local",
+            is_active=False,  # Mark as inactive so they can't login normally
+            first_name="Anonymous",
+            last_name="User",
+        )
+
+        return temp_user
 
     @database_sync_to_async
     def update_room_activity(self, room):

@@ -33,6 +33,28 @@ class UserRole(models.Model):
         super().save(*args, **kwargs)
 
 
+class AnonymousSession(models.Model):
+    session_id = models.CharField(max_length=64, unique=True, db_index=True)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="anonymous_session")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"Anonymous Session {self.session_id[:8]}... - {self.user.username}"
+    
+    @classmethod
+    def cleanup_old_sessions(cls, days=7):
+        """Remove anonymous sessions older than specified days"""
+        from django.utils import timezone
+        from datetime import timedelta
+        threshold = timezone.now() - timedelta(days=days)
+        old_sessions = cls.objects.filter(last_seen__lt=threshold)
+        for session in old_sessions:
+            user = session.user
+            session.delete()
+            user.delete()
+
+
 class Room(models.Model):
     id = models.AutoField(primary_key=True)
     host = models.ForeignKey(User, on_delete=models.CASCADE)
