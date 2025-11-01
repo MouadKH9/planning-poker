@@ -20,27 +20,28 @@ services:
       - planning_poker_network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d planning_poker_db"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d planning_poker_db" ]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # redis:
-  #   image: redis:7.2-alpine
-  #   container_name: planning_poker_redis
-  #   ports:
-  #     - "6379:6379"
-  #   networks:
-  #     - planning_poker_network
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  redis:
+    image: redis:7.2-alpine
+    container_name: planning_poker_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - planning_poker_network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
+
 
 networks:
   planning_poker_network:
